@@ -23,6 +23,7 @@ load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+app.json.compact = False  # Return formatted/pretty-printed JSON by default
 
 # ────────────────────────────────────────────────────────────
 # LOGGING SYSTEM
@@ -478,12 +479,13 @@ def run_scraper_task(city, country, specialization, auto_outreach):
 @app.route('/api', methods=['GET'])
 def api_index():
     """Root route - show API info."""
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
     return jsonify({
         "name": "ClinicFlow AI - Backend API",
         "status": "running",
         "version": "1.0.0",
-        "frontend_url": "http://localhost:5173",
-        "message": "Open http://localhost:5173 in your browser to use the app!",
+        "frontend_url": frontend_url,
+        "message": f"Open {frontend_url} in your browser to use the app!",
         "endpoints": {
             "health":   "GET  /api/health",
             "clinics":  "GET  /api/clinics",
