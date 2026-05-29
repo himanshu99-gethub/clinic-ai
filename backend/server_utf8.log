@@ -1,0 +1,38 @@
+﻿[OK] Connected to MongoDB.
+ * Serving Flask app 'app'
+ * Debug mode: off
+python : WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server 
+instead.
+At line:1 char:60
++ ... n3.12.exe /T; Start-Sleep -Seconds 1; python app.py > server.log 2>&1
++                                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (WARNING: This i...server instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ * Running on http://127.0.0.1:5000
+Press CTRL+C to quit
+[SCRAPER] Initializing REAL Selenium Scraper (Headless)...
+127.0.0.1 - - [16/May/2026 19:26:24] "POST /api/search HTTP/1.1" 202 -
+[SCRAPER] Searching Google Maps for: Dentist in Lucknow
+[SCRAPER] Found 7 places on first page.
+DEBUG /api/clinics: live_db size is 0
+DEBUG filters: city='', country='', spec=''
+DEBUG /api/clinics: returning 0 items after filter
+127.0.0.1 - - [16/May/2026 19:26:47] "GET /api/clinics HTTP/1.1" 200 -
+[SCRAPER] Scraper closed.
+DEBUG /api/clinics: live_db size is 6
+DEBUG filters: city='lucknow', country='india', spec='dentist'
+DEBUG first item city: 'Lucknow'
+DEBUG /api/clinics: returning 6 items after filter
+127.0.0.1 - - [16/May/2026 19:27:16] "GET /api/clinics?city=Lucknow&country=india&specialization=Dentist HTTP/1.1" 200 
+-
+127.0.0.1 - - [16/May/2026 19:27:17] "GET /api/stats?city=Lucknow&country=india&specialization=Dentist HTTP/1.1" 200 -
+127.0.0.1 - - [16/May/2026 19:27:17] "GET /api/logs HTTP/1.1" 200 -
+DEBUG /api/clinics: live_db size is 6
+127.0.0.1 - - [16/May/2026 19:28:17] "GET /api/stats?city=Lucknow&country=india&specialization=Dentist HTTP/1.1" 200 -
+DEBUG filters: city='lucknow', country='india', spec='dentist'
+127.0.0.1 - - [16/May/2026 19:28:17] "GET /api/logs HTTP/1.1" 200 -
+DEBUG first item city: 'Lucknow'
+DEBUG /api/clinics: returning 6 items after filter
+127.0.0.1 - - [16/May/2026 19:28:17] "GET /api/clinics?city=Lucknow&country=india&specialization=Dentist HTTP/1.1" 200 
+-
