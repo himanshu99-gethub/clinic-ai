@@ -215,7 +215,7 @@ def extract_from_html(html: str, site_url: str = '') -> list:
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
 
-def fetch(url: str, timeout=12, headers=None) -> str:
+def fetch(url: str, timeout=5, headers=None) -> str:
     hdrs = headers or HEADERS
     try:
         r = requests.get(url, headers=hdrs, timeout=timeout,
@@ -227,7 +227,7 @@ def fetch(url: str, timeout=12, headers=None) -> str:
     return ''
 
 
-def fetch_sub_urls(homepage_url: str, html: str, max_urls=25) -> list:
+def fetch_sub_urls(homepage_url: str, html: str, max_urls=6) -> list:
     """Return list of internal sub-page URLs to check for emails."""
     try:
         parsed = urllib.parse.urlparse(homepage_url)
@@ -271,7 +271,7 @@ def fetch_sub_urls(homepage_url: str, html: str, max_urls=25) -> list:
         return []
 
 
-def fetch_all_internal_links(homepage_url: str, html: str, max_urls=40) -> list:
+def fetch_all_internal_links(homepage_url: str, html: str, max_urls=10) -> list:
     """Collect ALL internal links (depth-1) for deep scan."""
     try:
         parsed = urllib.parse.urlparse(homepage_url)
@@ -302,7 +302,7 @@ def method_homepage(website: str) -> tuple:
     """M1: Scan homepage HTML."""
     if not website:
         return '', ''
-    html = fetch(website, timeout=12)
+    html = fetch(website, timeout=5)
     if html:
         ranked = extract_from_html(html, website)
         if ranked:
@@ -316,7 +316,7 @@ def method_subpages(website: str, homepage_html: str) -> str:
         return ''
     sub_urls = fetch_sub_urls(website, homepage_html)
     for url in sub_urls:
-        html = fetch(url, timeout=10)
+        html = fetch(url, timeout=5)
         if html:
             ranked = extract_from_html(html, website)
             if ranked:
@@ -326,85 +326,26 @@ def method_subpages(website: str, homepage_html: str) -> str:
 
 
 def method_deep_crawl(website: str, homepage_html: str) -> str:
-    """M3: Crawl ALL internal links (depth-2), scanning each for emails."""
+    """M3: Crawl ALL internal links (depth-1), scanning each for emails."""
     if not website or not homepage_html:
         return ''
-    all_links = fetch_all_internal_links(website, homepage_html, max_urls=35)
+    all_links = fetch_all_internal_links(website, homepage_html, max_urls=10)
     visited = set()
     for url in all_links:
         if url in visited:
             continue
         visited.add(url)
-        html = fetch(url, timeout=8)
+        html = fetch(url, timeout=5)
         if html:
             ranked = extract_from_html(html, website)
             if ranked:
                 log(f"    [M3-DEEP] {url} -> {ranked[0]}")
                 return ranked[0]
-            # Depth-2: follow links on this page too (only contact-like)
-            sub2 = fetch_sub_urls(url, html, max_urls=5)
-            for url2 in sub2:
-                if url2 in visited:
-                    continue
-                visited.add(url2)
-                html2 = fetch(url2, timeout=8)
-                if html2:
-                    ranked2 = extract_from_html(html2, website)
-                    if ranked2:
-                        log(f"    [M3-DEEP2] {url2} -> {ranked2[0]}")
-                        return ranked2[0]
     return ''
 
 
 def method_google(clinic_name: str, city: str, domain: str) -> str:
-    """M4: Google search scrape (3 query variants)."""
-    queries = []
-    if domain:
-        queries.append(f'site:{domain} email')
-        queries.append(f'"{domain}" email contact')
-    if clinic_name:
-        clean = re.sub(r'[^\w\s]', '', clinic_name)
-        queries.append(f'"{clean}" {city} email contact'.strip())
-        queries.append(f'"{clean}" email address'.strip())
-        queries.append(f'"{clean}" contact dentist email'.strip())
-
-    for q in queries[:4]:
-        url = f"https://www.google.com/search?q={urllib.parse.quote(q)}&num=10"
-        html = fetch(url, timeout=10)
-        if html:
-            ranked = extract_from_html(html, domain)
-            if ranked:
-                log(f"    [M4-GOOGLE] {ranked[0]}")
-                return ranked[0]
-        time.sleep(0.3)
-    return ''
-
-
-def method_bing(clinic_name: str, city: str, domain: str) -> str:
-    """M5: Bing search scrape (3 query variants)."""
-    queries = []
-    if domain:
-        queries.append(f'site:{domain} email')
-        queries.append(f'"{domain}" contact email')
-    if clinic_name:
-        clean = re.sub(r'[^\w\s]', '', clinic_name)
-        queries.append(f'"{clean}" {city} email'.strip())
-        queries.append(f'"{clean}" contact email dentist'.strip())
-
-    for q in queries[:3]:
-        url = f"https://www.bing.com/search?q={urllib.parse.quote(q)}&count=10"
-        html = fetch(url, timeout=10, headers=BING_HEADERS)
-        if html:
-            ranked = extract_from_html(html, domain)
-            if ranked:
-                log(f"    [M5-BING] {ranked[0]}")
-                return ranked[0]
-        time.sleep(0.3)
-    return ''
-
-
-def method_duckduckgo(clinic_name: str, city: str, domain: str) -> str:
-    """M6: DuckDuckGo HTML search scrape."""
+    """M4: Google search scrape (2 query variants)."""
     queries = []
     if domain:
         queries.append(f'site:{domain} email')
@@ -413,14 +354,53 @@ def method_duckduckgo(clinic_name: str, city: str, domain: str) -> str:
         queries.append(f'"{clean}" {city} email contact'.strip())
 
     for q in queries[:2]:
+        url = f"https://www.google.com/search?q={urllib.parse.quote(q)}&num=10"
+        html = fetch(url, timeout=5)
+        if html:
+            ranked = extract_from_html(html, domain)
+            if ranked:
+                log(f"    [M4-GOOGLE] {ranked[0]}")
+                return ranked[0]
+        time.sleep(0.1)
+    return ''
+
+
+def method_bing(clinic_name: str, city: str, domain: str) -> str:
+    """M5: Bing search scrape (2 query variants)."""
+    queries = []
+    if domain:
+        queries.append(f'site:{domain} email')
+    if clinic_name:
+        clean = re.sub(r'[^\w\s]', '', clinic_name)
+        queries.append(f'"{clean}" {city} email'.strip())
+
+    for q in queries[:2]:
+        url = f"https://www.bing.com/search?q={urllib.parse.quote(q)}&count=10"
+        html = fetch(url, timeout=5, headers=BING_HEADERS)
+        if html:
+            ranked = extract_from_html(html, domain)
+            if ranked:
+                log(f"    [M5-BING] {ranked[0]}")
+                return ranked[0]
+        time.sleep(0.1)
+    return ''
+
+
+def method_duckduckgo(clinic_name: str, city: str, domain: str) -> str:
+    """M6: DuckDuckGo HTML search scrape (1 query variant)."""
+    queries = []
+    if domain:
+        queries.append(f'site:{domain} email')
+
+    for q in queries[:1]:
         url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q)}"
-        html = fetch(url, timeout=12)
+        html = fetch(url, timeout=5)
         if html:
             ranked = extract_from_html(html, domain)
             if ranked:
                 log(f"    [M6-DDG] {ranked[0]}")
                 return ranked[0]
-        time.sleep(0.3)
+        time.sleep(0.1)
     return ''
 
 
@@ -430,7 +410,7 @@ def method_whois(domain: str) -> str:
         return ''
     try:
         rdap_url = f"https://rdap.org/domain/{domain}"
-        resp = fetch(rdap_url, timeout=10)
+        resp = fetch(rdap_url, timeout=4)
         if resp:
             ranked = extract_from_html(resp, domain)
             if ranked:
@@ -442,7 +422,7 @@ def method_whois(domain: str) -> str:
     # Try WHOIS via API
     try:
         whois_url = f"https://www.whois.com/whois/{domain}"
-        resp = fetch(whois_url, timeout=10)
+        resp = fetch(whois_url, timeout=4)
         if resp:
             ranked = extract_from_html(resp, domain)
             if ranked:
@@ -478,7 +458,7 @@ def search_website_on_google(clinic_name: str, city: str) -> str:
         try:
             # Try Google first
             url = f"https://www.google.com/search?q={urllib.parse.quote(q)}&num=3"
-            html = fetch(url, timeout=8)
+            html = fetch(url, timeout=5)
             if html:
                 soup = BeautifulSoup(html, 'html.parser')
                 for a in soup.find_all('a', href=True):
@@ -497,7 +477,7 @@ def search_website_on_google(clinic_name: str, city: str) -> str:
             
             # Fallback to Bing
             url = f"https://www.bing.com/search?q={urllib.parse.quote(q)}&count=3"
-            html = fetch(url, timeout=8, headers=BING_HEADERS)
+            html = fetch(url, timeout=5, headers=BING_HEADERS)
             if html:
                 soup = BeautifulSoup(html, 'html.parser')
                 for a in soup.find_all('a', href=True):
@@ -528,10 +508,7 @@ def method_construct(clinic_name: str, domain: str) -> str:
     if any(s in domain for s in skip):
         return ''
 
-    # Relax DNS check: warn but proceed
-    resolves = domain_resolves(domain)
-    if not resolves:
-        log(f"    [WARNING] Domain {domain} does not resolve, but constructing fallback email anyway.")
+    # Bypassed DNS check on Windows to prevent socket hangs
 
     for prefix in CONSTRUCT_PREFIXES:
         candidate = f"{prefix}@{domain}"
@@ -558,6 +535,8 @@ def find_email(clinic: dict) -> str:
                 log(f"    [RESOLVED AD LINK] Real URL: {website}")
             except Exception as e:
                 log(f"    [WARNING] Failed to resolve ad link redirect: {e}")
+                website = ""
+
 
     # ── M0.5: Search Google for official website if website is missing ──
     if not website:
