@@ -6,7 +6,16 @@ import SearchForm from './components/SearchForm';
 import ClinicTable from './components/ClinicTable';
 import AgentActivityLog from './components/AgentActivityLog';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081/api';
+const getApiUrl = () => {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+  if (window.location.port === '5173') {
+    return 'http://localhost:8081/api';
+  }
+  return '/api';
+};
+const API_BASE_URL = getApiUrl();
 
 
 // Configure axios with better error handling
