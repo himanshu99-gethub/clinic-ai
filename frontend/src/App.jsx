@@ -128,6 +128,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [activeFilter, setActiveFilter] = useState(null);
+  const [sending, setSending] = useState(false);
 
   // Safety net: loading can NEVER be stuck for more than 15 seconds
   useEffect(() => {
@@ -233,11 +234,14 @@ ClinicFlow AI | Lead Developer`);
       return;
     }
     
+    setSending(true);
+    setMessage('⏳ Bulk email outreach in progress... Please wait.');
     try {
       const clinicsWithEmail = clinics.filter(c => c.email && c.email.trim() !== '');
       
       if (!clinicsWithEmail.length) {
         setMessage('⚠️ WARNING: No clinics with email addresses found.');
+        setSending(false);
         setTimeout(() => setMessage(''), 5000);
         return;
       }
@@ -259,6 +263,8 @@ ClinicFlow AI | Lead Developer`);
       console.error('[Outreach Error]', e);
       setMessage(`❌ ERROR: ${e.response?.data?.error || 'Outreach protocol failed'}`);
       setTimeout(() => setMessage(''), 6000);
+    } finally {
+      setSending(false);
     }
   };
 
@@ -347,6 +353,18 @@ ClinicFlow AI | Lead Developer`);
             </div>
           </div>
 
+          {message && (
+            <div className="glass-panel" style={{
+              padding: '20px 32px', marginBottom: '32px',
+              background: message.includes('✅') ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)',
+              border: `1px solid ${message.includes('✅') ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
+              color: message.includes('✅') ? '#4ade80' : '#ffb4ab',
+              fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px'
+            }}>
+              {message}
+            </div>
+          )}
+
           {activeTab === 'dashboard' && (
             <>
               {/* Stats */}
@@ -357,18 +375,6 @@ ClinicFlow AI | Lead Developer`);
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: '40px', alignItems: 'start' }}>
                 <div style={{ minWidth: 0 }}>
                   <SearchForm onSearch={handleSearch} isLoading={loading} />
-
-                  {message && (
-                    <div className="glass-panel" style={{
-                      padding: '20px 32px', marginBottom: '32px',
-                      background: message.includes('✅') ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)',
-                      border: `1px solid ${message.includes('✅') ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
-                      color: message.includes('✅') ? '#4ade80' : '#ffb4ab',
-                      fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px'
-                    }}>
-                      {message}
-                    </div>
-                  )}
 
                   <div className="glass-panel" style={{
                     padding: '32px', border: '1px solid rgba(46,119,174,0.15)'
@@ -417,6 +423,7 @@ ClinicFlow AI | Lead Developer`);
                 onExport={handleExport} 
                 onAnalyze={handleAnalyze} 
                 onOutreach={handleOutreach}
+                isSending={sending}
               />
             </>
           )}
@@ -436,6 +443,7 @@ ClinicFlow AI | Lead Developer`);
                 onExport={handleExport} 
                 onAnalyze={handleAnalyze} 
                 onOutreach={handleOutreach}
+                isSending={sending}
               />
             </div>
           )}
@@ -451,6 +459,7 @@ ClinicFlow AI | Lead Developer`);
                 onExport={handleExport} 
                 onAnalyze={handleAnalyze} 
                 onOutreach={handleOutreach}
+                isSending={sending}
               />
             </div>
           )}

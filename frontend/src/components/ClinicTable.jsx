@@ -32,7 +32,7 @@ const outreachBadge = (status) => {
   );
 };
 
-const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach }) => {
+const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach, isSending }) => {
   const [filter, setFilter] = React.useState('All');
 
   const filteredClinics = clinics.filter(c => {
@@ -77,17 +77,25 @@ const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach }) => {
               </button>
             ))}
           </div>
-          <button onClick={onOutreach} style={{
-            padding: '10px 20px', background: 'linear-gradient(135deg, #2E77AE, #1a4b6e)',
-            border: 'none', borderRadius: '12px',
-            color: '#fff', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: '6px', fontFamily: 'inherit',
-            boxShadow: '0 4px 12px rgba(46,119,174,0.25)', transition: 'all 0.2s'
-          }}
-            onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-            onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
+          <button 
+            onClick={onOutreach} 
+            disabled={isSending}
+            style={{
+              padding: '10px 20px', 
+              background: isSending ? 'rgba(255,255,255,0.06)' : 'linear-gradient(135deg, #2E77AE, #1a4b6e)',
+              border: isSending ? '1px solid rgba(255,255,255,0.1)' : 'none', 
+              borderRadius: '12px',
+              color: isSending ? 'rgba(255,255,255,0.4)' : '#fff', 
+              fontSize: '13px', fontWeight: 700, 
+              cursor: isSending ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: '6px', fontFamily: 'inherit',
+              boxShadow: isSending ? 'none' : '0 4px 12px rgba(46,119,174,0.25)', 
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={e => { if (!isSending) e.currentTarget.style.transform = 'translateY(-2px)'; }}
+            onMouseLeave={e => { if (!isSending) e.currentTarget.style.transform = 'translateY(0)'; }}
           >
-            📧 Send Emails ({emailCount})
+            {isSending ? '⌛ Sending...' : `📧 Send Emails (${emailCount})`}
           </button>
           <button onClick={onExport} style={{
             padding: '10px 20px', background: 'rgba(255,255,255,0.08)',
