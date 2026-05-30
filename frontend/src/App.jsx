@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import Navbar from './components/Navbar';
 import StatsCard from './components/StatsCard';
@@ -194,7 +194,12 @@ export default function App() {
   }, [loading]);
   const [selectedClinic, setSelectedClinic] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [globalTemplate, setGlobalTemplate] = useState(`Subject: Strategic Partnership Inquiry | [Clinic Name]
+  const stopOutreachRef = useRef(false);
+
+  const getSavedTemplate = () => {
+    const saved = localStorage.getItem('outreach_template');
+    if (saved) return saved;
+    return `Subject: Strategic Partnership Inquiry | [Clinic Name]
 
 Dear Administrative Team,
 
@@ -208,7 +213,10 @@ Would you be available for a brief 15-minute call this week?
 
 Best regards,
 Himanshu Shakya
-ClinicFlow AI | Lead Developer`);
+ClinicFlow AI | Lead Developer`;
+  };
+
+  const [globalTemplate, setGlobalTemplate] = useState(getSavedTemplate());
 
   const fetchData = async (filter) => {
     try {
@@ -284,6 +292,18 @@ ClinicFlow AI | Lead Developer`);
     setSelectedClinic(clinic);
   };
 
+  const handleSaveTemplate = (val) => {
+    setGlobalTemplate(val);
+    localStorage.setItem('outreach_template', val);
+    setMessage('✅ GLOBAL OUTREACH PROTOCOL SAVED SUCCESSFULLY');
+    setTimeout(() => setMessage(''), 5000);
+  };
+
+  const handleStopOutreach = () => {
+    stopOutreachRef.current = true;
+    setMessage('🛑 Stopping Outreach Agent... Please wait.');
+  };
+
   const handleOutreach = async () => {
     const clinicsWithEmail = clinics.filter(c => c.email && c.email.trim() !== '');
     
@@ -294,11 +314,19 @@ ClinicFlow AI | Lead Developer`);
     }
     
     setSending(true);
+    stopOutreachRef.current = false; // Reset stop flag
     let successCount = 0;
     let failCount = 0;
     
     // Loop through each clinic and send email individually
     for (let i = 0; i < clinicsWithEmail.length; i++) {
+      if (stopOutreachRef.current) {
+        setMessage(`🛑 OUTREACH STOPPED BY USER: Sent: ${successCount}, Failed: ${failCount}`);
+        setSending(false);
+        setTimeout(() => setMessage(''), 10000);
+        return;
+      }
+      
       const clinic = clinicsWithEmail[i];
       const progressMessage = `⏳ Sending email ${i + 1}/${clinicsWithEmail.length} to ${clinic.name}...`;
       setMessage(progressMessage);
@@ -499,39 +527,75 @@ ClinicFlow AI | Lead Developer`);
             </>
           )}
 
-          {activeTab === 'discovery' && (
+          {activeTab === 'email_manage' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px' }}>
-                <SearchForm onSearch={handleSearch} isLoading={loading} />
-                <TemplateEditor template={globalTemplate} onSave={(val) => {
-                  setGlobalTemplate(val);
-                  setMessage('✅ GLOBAL OUTREACH PROTOCOL UPDATED');
-                  setTimeout(() => setMessage(''), 5000);
-                }} />
-              </div>
-              <ClinicTable 
-                clinics={clinics} 
-                onExport={handleExport} 
-                onAnalyze={handleAnalyze} 
-                onOutreach={handleOutreach}
-                isSending={sending}
-              />
-            </div>
-          )}
+              
+              {/* Outreach Status Cards & Actions */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '24px' }}>
+                
+                {/* Total Emailed Card */}
+                <div className="glass-panel" style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+                  <div style={{ fontSize: '32px' }}>✉️</div>
+                  <div>
+                    <h4 style={{ color: 'rgba(255,255,255,0.4)', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>Total Emailed</h4>
+                    <p style={{ color: '#fff', fontSize: '24px', fontWeight: 900, marginTop: '4px' }}>{stats.contacted || 0}</p>
+                  </div>
+                </div>
 
-          {activeTab === 'archive' && (
-            <div>
-              <div className="glass-panel" style={{ padding: '32px', marginBottom: '40px', border: '1px solid rgba(46,119,174,0.2)' }}>
-                <h3 style={{ color: '#fff', fontSize: '18px', fontWeight: 900, marginBottom: '8px' }}>ARCHIVE VAULT</h3>
-                <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '13px' }}>Showing all clinical nodes successfully contacted by the AI agent.</p>
+                {/* Pending Outreach Card */}
+                <div className="glass-panel" style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+                  <div style={{ fontSize: '32px' }}>⏳</div>
+                  <div>
+                    <h4 style={{ color: 'rgba(255,255,255,0.4)', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>Pending Outreach</h4>
+                    <p style={{ color: '#FF8E2B', fontSize: '24px', fontWeight: 900, marginTop: '4px' }}>{stats.pending || 0}</p>
+                  </div>
+                </div>
+
+                {/* Stop Agent Card/Action */}
+                {sending && (
+                  <div className="glass-panel" style={{ 
+                    padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
+                    border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.05)'
+                  }}>
+                    <button 
+                      onClick={handleStopOutreach}
+                      className="glow-btn"
+                      style={{
+                        padding: '12px 24px', background: '#ef4444', border: 'none', borderRadius: '10px',
+                        color: '#fff', fontWeight: 800, fontSize: '12px', cursor: 'pointer',
+                        textTransform: 'uppercase', letterSpacing: '1px', boxShadow: '0 0 15px rgba(239,68,68,0.4)',
+                        animation: 'pulse 1.5s infinite'
+                      }}
+                    >
+                      🛑 STOP OUTREACH AGENT
+                    </button>
+                  </div>
+                )}
               </div>
-              <ClinicTable 
-                clinics={archivedClinics} 
-                onExport={handleExport} 
-                onAnalyze={handleAnalyze} 
-                onOutreach={handleOutreach}
-                isSending={sending}
-              />
+
+              {/* Two Column Layout for template editing and logs */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px', alignItems: 'start' }}>
+                
+                {/* Template Editor */}
+                <TemplateEditor template={globalTemplate} onSave={handleSaveTemplate} />
+                
+                {/* Sent List Table & Stats */}
+                <div>
+                  <div className="glass-panel" style={{ padding: '32px', marginBottom: '24px', border: '1px solid rgba(46,119,174,0.2)' }}>
+                    <h3 style={{ color: '#fff', fontSize: '16px', fontWeight: 900, marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px' }}>Outreach Logs</h3>
+                    <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1.5px' }}>
+                      Verified clinic nodes contacted successfully
+                    </p>
+                  </div>
+                  <ClinicTable 
+                    clinics={archivedClinics} 
+                    onExport={handleExport} 
+                    onAnalyze={handleAnalyze} 
+                    onOutreach={handleOutreach}
+                    isSending={sending}
+                  />
+                </div>
+              </div>
             </div>
           )}
 

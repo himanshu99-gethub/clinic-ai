@@ -2,9 +2,8 @@ import React from 'react';
 
 const Navbar = ({ activeTab, onTabChange }) => {
   const navItems = [
-    { id: 'dashboard', label: 'MISSION DASHBOARD' },
-    { id: 'discovery', label: 'DISCOVERY UNIT' },
-    { id: 'archive', label: 'CONTACT ARCHIVE' }
+    { id: 'dashboard', label: 'MISSION CONTROL' },
+    { id: 'email_manage', label: 'EMAIL MANAGE' }
   ];
 
   return (
