@@ -42,6 +42,8 @@ const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach }) => {
     return true;
   });
 
+  const emailCount = clinics.filter(c => c.email && c.email.trim() !== '').length;
+
   const thStyle = {
     padding: '14px 20px', textAlign: 'left', fontSize: '11px', fontWeight: 700,
     color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '2px',
@@ -85,7 +87,7 @@ const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach }) => {
             onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
             onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
           >
-            🤖 Bulk Outreach
+            📧 Send Emails ({emailCount})
           </button>
           <button onClick={onExport} style={{
             padding: '10px 20px', background: 'rgba(255,255,255,0.08)',

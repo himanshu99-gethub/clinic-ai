@@ -234,19 +234,20 @@ ClinicFlow AI | Lead Developer`);
     }
     
     try {
-      const verifiedClinics = clinics.filter(c => c.status === 'Verified' && c.email);
+      const clinicsWithEmail = clinics.filter(c => c.email && c.email.trim() !== '');
       
-      if (!verifiedClinics.length) {
-        setMessage('⚠️ WARNING: No verified clinics with email addresses found.');
+      if (!clinicsWithEmail.length) {
+        setMessage('⚠️ WARNING: No clinics with email addresses found.');
         setTimeout(() => setMessage(''), 5000);
         return;
       }
       
       const res = await axios.post(`${API_BASE_URL}/outreach`, {
-        clinic_names: verifiedClinics.map(c => c.name)
+        clinic_names: clinicsWithEmail.map(c => c.name),
+        template: globalTemplate
       });
       
-      setMessage(`✅ SUCCESS: Outreach protocol completed. Contacted: ${res.data.contacted}, Failed: ${res.data.failed}`);
+      setMessage(`✅ SUCCESS: Bulk email outreach completed. Sent: ${res.data.contacted}, Failed: ${res.data.failed}`);
       
       // Refresh data
       setTimeout(() => {

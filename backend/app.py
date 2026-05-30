@@ -194,23 +194,79 @@ def is_duplicate_clinic(clinic_data, exclude_name=None):
             
     return False
 
-def auto_send(clinic):
-    """Send automated email to clinic (placeholder)."""
+def auto_send(clinic, template=None):
+    """Send automated email to clinic using SMTP."""
     try:
-        log(f"OUTREACH: Attempting to contact {clinic['name']}", "INFO")
+        clinic_name = clinic.get("name", "Clinic")
+        recipient_email = clinic.get("email", "").strip()
+        
+        if not recipient_email:
+            log(f"OUTREACH: No email address for {clinic_name}", "WARNING")
+            return False
+            
+        log(f"OUTREACH: Attempting to contact {clinic_name} at {recipient_email}", "INFO")
         
         email_user = os.getenv("EMAIL_USER")
         email_pass = os.getenv("EMAIL_PASS")
+        email_host = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+        try:
+            email_port = int(os.getenv("EMAIL_PORT", "587"))
+        except:
+            email_port = 587
         
         if not email_user or not email_pass:
             log("Email credentials not configured", "WARNING")
             return False
+            
+        # Parse template
+        subject = "Strategic Partnership Inquiry"
+        body = template or ""
         
-        # Placeholder for actual email sending
-        log(f"OUTREACH: Would send email to {clinic.get('email', 'N/A')}", "INFO")
+        if template:
+            # If the template starts with "Subject:", extract it
+            if template.strip().lower().startswith("subject:"):
+                lines = template.split('\n', 1)
+                subject_line = lines[0]
+                subject = subject_line.replace("Subject:", "").replace("subject:", "").strip()
+                if len(lines) > 1:
+                    body = lines[1].strip()
+            
+            # Replace placeholder [Clinic Name] with actual name
+            subject = subject.replace("[Clinic Name]", clinic_name)
+            body = body.replace("[Clinic Name]", clinic_name)
+        else:
+            # Default fallback template
+            subject = f"Strategic Partnership Inquiry | {clinic_name}"
+            body = (
+                f"Dear Administrative Team,\n\n"
+                f"I hope this message finds you well. I am reaching out to {clinic_name} regarding a collaboration opportunity.\n\n"
+                f"We would love to discuss how we can support your clinic.\n\n"
+                f"Best regards,\nHimanshu Shakya"
+            )
+            
+        # Create message container
+        msg = MIMEMultipart()
+        msg['From'] = email_user
+        msg['To'] = recipient_email
+        msg['Subject'] = subject
+        
+        # Record the MIME types
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+        
+        # Connect and send
+        log(f"SMTP: Connecting to {email_host}:{email_port}...", "INFO")
+        server = smtplib.SMTP(email_host, email_port)
+        server.starttls()
+        log("SMTP: Logging in...", "INFO")
+        server.login(email_user, email_pass)
+        log(f"SMTP: Sending email to {recipient_email}...", "INFO")
+        server.sendmail(email_user, recipient_email, msg.as_string())
+        server.quit()
+        
+        log(f"OUTREACH: Successfully sent email to {recipient_email}", "OK")
         return True
     except Exception as e:
-        log(f"Outreach Error: {str(e)}", "ERROR")
+        log(f"Outreach Error sending to {clinic.get('email', 'N/A')}: {str(e)}\n{traceback.format_exc()}", "ERROR")
         return False
 
 # ────────────────────────────────────────────────────────────
@@ -659,6 +715,7 @@ def trigger_outreach():
     try:
         data = request.json or {}
         clinic_ids = data.get('clinic_names', [])
+        template = data.get('template', '')
         
         add_log(f"📧 Bulk outreach initiated for {len(clinic_ids)} clinics")
         
@@ -674,13 +731,18 @@ def trigger_outreach():
                     clinic = next((c for c in live_db if c['name'] == clinic_name), None)
                 
                 if clinic and clinic.get('email'):
-                    if auto_send(clinic):
+                    if auto_send(clinic, template):
                         contacted += 1
                         if clinics_collection:
                             clinics_collection.update_one(
                                 {"name": clinic_name},
                                 {"$set": {"outreach_status": "Contacted"}}
                             )
+                        # Also update memory live_db state for real-time tracking
+                        for c in live_db:
+                            if c['name'] == clinic_name:
+                                c['outreach_status'] = 'Contacted'
+                                break
                     else:
                         failed += 1
             except Exception as e:
