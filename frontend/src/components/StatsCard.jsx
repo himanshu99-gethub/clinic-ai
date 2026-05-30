@@ -88,10 +88,10 @@ const StatsCard = ({ title, value, icon, color, trend, trendColor, sparklinePath
 };
 
 // Helper for mapping trend colors
-const trendColorClassClass = (color) => {
+function trendColorClassClass(color) {
   if (color === 'primary') return 'text-primary';
   if (color === 'secondary') return 'text-secondary';
   return 'text-secondary-container';
-};
+}
 
 export default StatsCard;
