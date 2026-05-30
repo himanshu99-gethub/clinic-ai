@@ -24,9 +24,6 @@ fi
 echo "...Installing Python dependencies"
 pip install -r requirements.txt
 
-# Install frontend dependencies and build React app
-echo "...Installing and building frontend"
-npm --prefix frontend install
-npm --prefix frontend run build
+# Frontend files are pre-built and committed to Git under frontend/dist, so no npm build is required on Render.
 
 echo "✓ Build script completed successfully!"
