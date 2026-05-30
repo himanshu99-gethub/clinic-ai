@@ -29,11 +29,37 @@ axios.interceptors.response.use(
 
 // ── Template Editor ──────────────────────────────────────
 const TemplateEditor = ({ template, onSave }) => {
-  const [val, setVal] = useState(template);
-  const [prompt, setPrompt] = useState('');
-  const [generating, setGenerating] = useState(false);
+  const getInitialState = (tpl) => {
+    const str = tpl || "";
+    if (str.trim().toLowerCase().startsWith("subject:")) {
+      const idx = str.indexOf('\n');
+      if (idx !== -1) {
+        const firstLine = str.substring(0, idx);
+        const subject = firstLine.replace(/Subject:/i, '').trim();
+        const body = str.substring(idx + 1).trim();
+        return { subject, body };
+      }
+    }
+    return { subject: "Strategic Partnership Inquiry", body: str };
+  };
+
+  const initial = getInitialState(template);
+  const [subject, setSubject] = useState(initial.subject);
+  const [body, setBody] = useState(initial.body);
   const [testEmail, setTestEmail] = useState('');
   const [testingEmail, setTestingEmail] = useState(false);
+
+  // Keep local state in sync with saved protocol
+  useEffect(() => {
+    const updated = getInitialState(template);
+    setSubject(updated.subject);
+    setBody(updated.body);
+  }, [template]);
+
+  const handleSave = () => {
+    const combined = `Subject: ${subject}\n${body}`;
+    onSave(combined);
+  };
 
   const handleSendTest = async () => {
     if (!testEmail) {
@@ -42,9 +68,10 @@ const TemplateEditor = ({ template, onSave }) => {
     }
     setTestingEmail(true);
     try {
+      const combined = `Subject: ${subject}\n${body}`;
       const res = await axios.post(`${API_BASE_URL}/send-test-email`, {
         email: testEmail,
-        template: val
+        template: combined
       });
       alert(res.data.message || 'Test email sent successfully!');
     } catch (e) {
@@ -55,80 +82,62 @@ const TemplateEditor = ({ template, onSave }) => {
     }
   };
 
-  // Keep local state in sync with saved protocol
-  useEffect(() => {
-    setVal(template);
-  }, [template]);
-
-  const handleAIGenerate = async () => {
-    if (!prompt) return;
-    setGenerating(true);
-    try {
-      const res = await axios.post(`${API_BASE_URL}/generate-protocol`, { prompt });
-      setVal(res.data.template);
-      console.log("AI Generation Successful");
-    } catch (e) {
-      alert('AI Generation Failed - Check Backend');
-    } finally {
-      setGenerating(false);
-    }
-  };
-
   return (
     <div className="glass-panel" style={{ padding: '40px', position: 'relative' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <div>
           <h2 style={{ fontSize: '20px', fontWeight: 900, color: '#fff', textTransform: 'uppercase', letterSpacing: '1px' }}>Global Protocol Editor</h2>
           <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginTop: '4px', textTransform: 'uppercase', letterSpacing: '2px' }}>
-            Configure your AI Agent's Default Message
+            Configure your Outreach Subject and Template Body
           </p>
         </div>
-        <button onClick={() => onSave(val)} className="glow-btn" style={{
+        <button onClick={handleSave} className="glow-btn" style={{
           padding: '12px 32px', background: '#2E77AE', border: 'none', borderRadius: '12px',
           color: '#fff', fontWeight: 800, fontSize: '12px', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '2px'
         }}>💾 Save Protocol</button>
       </div>
 
-      {/* AI Writer Tool */}
-      <div style={{ 
-        background: 'rgba(46,119,174,0.05)', border: '1px solid rgba(46,119,174,0.15)',
-        padding: '20px', borderRadius: '16px', marginBottom: '24px'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <p style={{ fontSize: '11px', color: '#4a9fd4', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>
-            🤖 AI Protocol Writer
-          </p>
-          {generating && <span style={{ fontSize: '10px', color: '#FF8E2B', fontWeight: 800, animation: 'pulse 1s infinite' }}>SYNTHESIZING NEW PROTOCOL...</span>}
-        </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <input 
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Type your goal (e.g. 'friendly dental email')..."
-            style={{
-              flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)',
-              borderRadius: '10px', padding: '10px 16px', color: '#fff', fontSize: '13px', outline: 'none'
-            }}
-          />
-          <button 
-            onClick={handleAIGenerate}
-            disabled={generating}
-            style={{
-              padding: '10px 20px', background: generating ? 'rgba(255,255,255,0.1)' : 'rgba(46,119,174,0.2)', 
-              border: '1px solid rgba(46,119,174,0.3)',
-              borderRadius: '10px', color: '#fff', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
-              transition: 'all 0.2s', textTransform: 'uppercase'
-            }}
-          >
-            {generating ? '⌛ Thinking...' : 'Email Generate'}
-          </button>
-        </div>
+      {/* Subject Line */}
+      <div style={{ marginBottom: '24px' }}>
+        <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#2E77AE', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px' }}>
+          📧 Email Subject Line
+        </label>
+        <input 
+          type="text"
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          placeholder="Enter outreach subject line..."
+          style={{
+            width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '10px', padding: '12px 16px', color: '#fff', fontSize: '14px', outline: 'none'
+          }}
+        />
+      </div>
+
+      {/* Email Body */}
+      <div style={{ marginBottom: '24px' }}>
+        <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#2E77AE', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px' }}>
+          📝 Email Body Template
+        </label>
+        <p style={{ fontSize: '12px', color: '#2E77AE', fontWeight: 700, marginBottom: '8px' }}>
+          💡 TIP: Use <code style={{ color: '#FF8E2B' }}>[Clinic Name]</code> as a placeholder for the clinic's name.
+        </p>
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Dear Administrative Team, ..."
+          style={{
+            width: '100%', minHeight: '260px', background: 'rgba(0,0,0,0.5)',
+            border: '1px solid rgba(255,255,255,0.1)', borderRadius: '14px',
+            padding: '20px', color: '#fff', fontSize: '14px', lineHeight: '1.8', outline: 'none'
+          }}
+        />
       </div>
 
       {/* Test Email Tool */}
       <div style={{ 
         background: 'rgba(255,142,43,0.05)', border: '1px solid rgba(255,142,43,0.15)',
-        padding: '20px', borderRadius: '16px', marginBottom: '24px'
+        padding: '20px', borderRadius: '16px'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
           <p style={{ fontSize: '11px', color: '#FF8E2B', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>
@@ -160,20 +169,6 @@ const TemplateEditor = ({ template, onSave }) => {
           </button>
         </div>
       </div>
-
-      <p style={{ fontSize: '12px', color: '#2E77AE', fontWeight: 700, marginBottom: '12px' }}>
-        💡 TIP: Use <code style={{ color: '#FF8E2B' }}>[Clinic Name]</code> as a placeholder for the clinic's name.
-      </p>
-      <textarea
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        style={{
-          width: '100%', minHeight: '300px', background: 'rgba(0,0,0,0.5)',
-          border: '1px solid rgba(255,255,255,0.1)', borderRadius: '14px',
-          padding: '24px', color: '#fff', fontSize: '14px', lineHeight: '1.8', outline: 'none',
-          opacity: generating ? 0.5 : 1, transition: 'opacity 0.3s'
-        }}
-      />
     </div>
   );
 };
