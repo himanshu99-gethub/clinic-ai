@@ -201,8 +201,9 @@ def auto_send(clinic, template=None):
         recipient_email = clinic.get("email", "").strip()
         
         if not recipient_email:
-            log(f"OUTREACH: No email address for {clinic_name}", "WARNING")
-            return False
+            msg = f"No email address for {clinic_name}"
+            log(f"OUTREACH: {msg}", "WARNING")
+            return False, msg
             
         log(f"OUTREACH: Attempting to contact {clinic_name} at {recipient_email}", "INFO")
         
@@ -215,8 +216,9 @@ def auto_send(clinic, template=None):
             email_port = 587
         
         if not email_user or not email_pass:
-            log("Email credentials not configured", "WARNING")
-            return False
+            msg = "Email credentials (EMAIL_USER or EMAIL_PASS) not configured in environment variables."
+            log(msg, "WARNING")
+            return False, msg
             
         # Parse template
         subject = "Strategic Partnership Inquiry"
@@ -254,24 +256,64 @@ def auto_send(clinic, template=None):
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
         
         # Connect and send
-        log(f"SMTP: Connecting to {email_host}:{email_port}...", "INFO")
-        if email_port == 465:
-            server = smtplib.SMTP_SSL(email_host, email_port, timeout=15)
-        else:
-            server = smtplib.SMTP(email_host, email_port, timeout=15)
-            server.starttls()
+        connected = False
+        server = None
+        conn_errors = []
+        
+        # Try configured port first
+        try:
+            log(f"SMTP: Connecting to {email_host}:{email_port}...", "INFO")
+            if email_port == 465:
+                server = smtplib.SMTP_SSL(email_host, email_port, timeout=15)
+            else:
+                server = smtplib.SMTP(email_host, email_port, timeout=15)
+                server.starttls()
+            connected = True
+        except Exception as e:
+            err_msg = f"Port {email_port} connection failed: {str(e)}"
+            log(f"SMTP: {err_msg}", "WARNING")
+            conn_errors.append(err_msg)
             
-        log("SMTP: Logging in...", "INFO")
-        server.login(email_user, email_pass)
-        log(f"SMTP: Sending email to {recipient_email}...", "INFO")
-        server.sendmail(email_user, recipient_email, msg.as_string())
-        server.quit()
+        # Fallback to port 465 with SSL if STARTTLS port failed (Render environment compatibility)
+        if not connected and email_port != 465:
+            try:
+                log(f"SMTP: Render/Cloud environment fallback — attempting SSL connection on {email_host}:465...", "INFO")
+                server = smtplib.SMTP_SSL(email_host, 465, timeout=15)
+                connected = True
+            except Exception as fallback_err:
+                err_msg = f"Port 465 fallback failed: {str(fallback_err)}"
+                log(f"SMTP: {err_msg}", "ERROR")
+                conn_errors.append(err_msg)
+                
+        if not connected or not server:
+            raise Exception(f"Failed to connect to SMTP server. Details: {'; '.join(conn_errors)}")
+            
+        try:
+            log("SMTP: Logging in...", "INFO")
+            server.login(email_user, email_pass)
+            log(f"SMTP: Sending email to {recipient_email}...", "INFO")
+            server.sendmail(email_user, recipient_email, msg.as_string())
+            server.quit()
+        except smtplib.SMTPAuthenticationError as auth_err:
+            log(f"SMTP AUTHENTICATION ERROR: {str(auth_err)}", "ERROR")
+            try:
+                server.close()
+            except:
+                pass
+            return False, f"SMTP Authentication failed: {str(auth_err)}. Please verify your App Password."
+        except Exception as send_err:
+            log(f"SMTP SEND ERROR: {str(send_err)}", "ERROR")
+            try:
+                server.close()
+            except:
+                pass
+            return False, f"SMTP Transmission failed: {str(send_err)}"
         
         log(f"OUTREACH: Successfully sent email to {recipient_email}", "OK")
-        return True
+        return True, "Success"
     except Exception as e:
         log(f"Outreach Error sending to {clinic.get('email', 'N/A')}: {str(e)}\n{traceback.format_exc()}", "ERROR")
-        return False
+        return False, str(e)
 
 # ────────────────────────────────────────────────────────────
 # SCRAPER TASK
@@ -735,7 +777,8 @@ def trigger_outreach():
                     clinic = next((c for c in live_db if c['name'] == clinic_name), None)
                 
                 if clinic and clinic.get('email'):
-                    if auto_send(clinic, template):
+                    success, err_msg = auto_send(clinic, template)
+                    if success:
                         contacted += 1
                         if clinics_collection:
                             clinics_collection.update_one(
@@ -749,6 +792,7 @@ def trigger_outreach():
                                 break
                     else:
                         failed += 1
+                        add_log(f"❌ Outreach failed for {clinic_name}: {err_msg}")
             except Exception as e:
                 log(f"Error contacting {clinic_name}: {str(e)}", "WARNING")
                 failed += 1
@@ -875,12 +919,12 @@ def send_test_email():
         }
         
         log(f"TEST_EMAIL: Attempting to send test outreach email to {test_email}", "INFO")
-        success = auto_send(test_clinic, template)
+        success, err_msg = auto_send(test_clinic, template)
         
         if success:
             return jsonify({"message": f"Test email successfully sent to {test_email}!"}), 200
         else:
-            return jsonify({"error": "Failed to send email. Check backend logs/configurations."}), 500
+            return jsonify({"error": f"Failed to send email: {err_msg}"}), 500
     except Exception as e:
         log(f"TEST_EMAIL_ERR: {str(e)}", "ERROR")
         return jsonify({"error": f"Error initiating test: {str(e)}"}), 500
