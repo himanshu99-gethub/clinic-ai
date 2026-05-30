@@ -207,19 +207,6 @@ def auto_send(clinic, template=None):
             
         log(f"OUTREACH: Attempting to contact {clinic_name} at {recipient_email}", "INFO")
         
-        email_user = os.getenv("EMAIL_USER")
-        email_pass = os.getenv("EMAIL_PASS")
-        email_host = os.getenv("EMAIL_HOST", "smtp.gmail.com")
-        try:
-            email_port = int(os.getenv("EMAIL_PORT", "587"))
-        except:
-            email_port = 587
-        
-        if not email_user or not email_pass:
-            msg = "Email credentials (EMAIL_USER or EMAIL_PASS) not configured in environment variables."
-            log(msg, "WARNING")
-            return False, msg
-            
         # Parse template
         subject = "Strategic Partnership Inquiry"
         body = template or ""
@@ -245,6 +232,52 @@ def auto_send(clinic, template=None):
                 f"We would love to discuss how we can support your clinic.\n\n"
                 f"Best regards,\nHimanshu Shakya"
             )
+            
+        # Try Google Apps Script HTTP Relay if configured
+        apps_script_url = os.getenv("APPS_SCRIPT_URL")
+        if apps_script_url:
+            try:
+                log(f"HTTP RELAY: Sending email to {recipient_email} via Google Apps Script Web App...", "INFO")
+                payload = {
+                    "to": recipient_email,
+                    "subject": subject,
+                    "body": body,
+                    "token": os.getenv("APPS_SCRIPT_SECRET", "clinic-flow-secret-token")
+                }
+                response = requests.post(apps_script_url, json=payload, timeout=15)
+                if response.status_code == 200:
+                    try:
+                        res_json = response.json()
+                        if res_json.get("status") == "success":
+                            log(f"HTTP RELAY: Successfully sent email to {recipient_email} via Apps Script", "OK")
+                            return True, "Success"
+                        else:
+                            relay_err = res_json.get("message", "Unknown relay error")
+                            log(f"HTTP RELAY WARNING: {relay_err}", "WARNING")
+                            # Fallback to SMTP
+                    except Exception as json_err:
+                        log(f"HTTP RELAY WARNING: Response not JSON: {response.text[:200]}", "WARNING")
+                        # Fallback to SMTP
+                else:
+                    log(f"HTTP RELAY WARNING: Request failed with status code {response.status_code}", "WARNING")
+                    # Fallback to SMTP
+            except Exception as relay_ex:
+                log(f"HTTP RELAY WARNING: Connection failed: {str(relay_ex)}", "WARNING")
+                # Fallback to SMTP
+        
+        # Standard SMTP Flow
+        email_user = os.getenv("EMAIL_USER")
+        email_pass = os.getenv("EMAIL_PASS")
+        email_host = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+        try:
+            email_port = int(os.getenv("EMAIL_PORT", "587"))
+        except:
+            email_port = 587
+            
+        if not email_user or not email_pass:
+            msg = "Email credentials (EMAIL_USER or EMAIL_PASS) or APPS_SCRIPT_URL not configured."
+            log(msg, "WARNING")
+            return False, msg
             
         # Create message container
         msg = MIMEMultipart()
