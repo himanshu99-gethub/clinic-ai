@@ -252,7 +252,10 @@ ClinicFlow AI | Lead Developer`);
     setLoading(true);
     setMessage('');
     try {
-      const response = await axios.post(`${API_BASE_URL}/search`, query, { timeout: 10000 });
+      const response = await axios.post(`${API_BASE_URL}/search`, {
+        ...query,
+        template: globalTemplate
+      }, { timeout: 10000 });
       
       // Set the filter to show results from this search
       setActiveFilter({ 

@@ -352,7 +352,7 @@ def auto_send(clinic, template=None):
 # SCRAPER TASK
 # ────────────────────────────────────────────────────────────
 
-def run_scraper_task(city, country, specialization, auto_outreach):
+def run_scraper_task(city, country, specialization, auto_outreach, template=""):
     """Main scraper orchestration function."""
     global live_db
     
@@ -502,6 +502,15 @@ def run_scraper_task(city, country, specialization, auto_outreach):
                         verified_count += 1
                     add_log(f"✅ Found email: {email}")
                     log(f"[PROCESS_EMAIL_FOUND] Email found! verified_count now = {verified_count}", "OK")
+                    
+                    if auto_outreach:
+                        add_log(f"⏳ Auto-outreach: Sending email to {name}...")
+                        success, err_msg = auto_send(clinic_ref, template)
+                        if success:
+                            clinic_ref["outreach_status"] = "Contacted"
+                            add_log(f"🚀 Auto-outreach: Email sent successfully to {name}")
+                        else:
+                            add_log(f"❌ Auto-outreach failed for {name}: {err_msg}")
                 else:
                     log(f"[PROCESS_EMAIL_EMPTY] Email extraction returned empty", "WARNING")
                 
@@ -666,10 +675,12 @@ def launch_search():
         
         add_log(f"📡 New search request: {specialization} in {city}, {country}")
         
+        template = data.get('template', '')
+        
         # Launch async scraper task
         thread = threading.Thread(
             target=run_scraper_task,
-            args=(city, country, specialization, auto_outreach),
+            args=(city, country, specialization, auto_outreach, template),
             daemon=True
         )
         thread.start()
