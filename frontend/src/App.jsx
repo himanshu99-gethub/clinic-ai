@@ -436,7 +436,7 @@ ClinicFlow AI Team`);
       <div className="relative z-10 flex">
         <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
 
-        <main className="flex-1 md:ml-64 min-h-screen flex flex-col pb-20 md:pb-10">
+        <main className="desktop-main flex-1 min-h-screen flex flex-col pb-20 md:pb-10">
           {/* Top Header */}
           <header className="bg-background/80 backdrop-blur-xl border-b border-outline-variant/15 sticky top-0 z-30 shadow-sm flex justify-between items-center w-full px-6 md:px-10 py-4">
             <div className="flex items-center gap-8 w-full max-w-xl">
@@ -607,23 +607,23 @@ ClinicFlow AI Team`);
                       <span>Workflow Events</span>
                     </h3>
                     
-                    <div className="space-y-4 relative flex-1 before:content-[''] before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-[2px] before:bg-outline-variant/10">
-                      <div className="relative pl-8">
-                        <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-surface-container-highest flex items-center justify-center border border-primary/30 z-10">
+                    <div className="timeline-list relative flex-1 before:content-[''] before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-[2px] before:bg-outline-variant/10">
+                      <div className="timeline-item">
+                        <div className="timeline-badge bg-surface-container-highest border border-primary/30">
                           <span className="material-symbols-outlined text-[10px] text-primary">mail</span>
                         </div>
                         <p className="text-xs font-bold">Email Blast transmitted</p>
                         <p className="text-[10px] text-on-surface-variant opacity-80 mt-0.5">Cardio leads • 2 mins ago</p>
                       </div>
-                      <div className="relative pl-8">
-                        <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-surface-container-highest flex items-center justify-center border border-secondary/30 z-10">
+                      <div className="timeline-item">
+                        <div className="timeline-badge bg-surface-container-highest border border-secondary/30">
                           <span className="material-symbols-outlined text-[10px] text-secondary">verified</span>
                         </div>
                         <p className="text-xs font-bold">AI leads enrichment complete</p>
                         <p className="text-[10px] text-on-surface-variant opacity-80 mt-0.5">84 verified • 15 mins ago</p>
                       </div>
-                      <div className="relative pl-8 opacity-65">
-                        <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-surface-container-highest flex items-center justify-center border border-outline-variant/30 z-10">
+                      <div className="timeline-item opacity-65">
+                        <div className="timeline-badge bg-surface-container-highest border border-outline-variant/30">
                           <span className="material-symbols-outlined text-[10px] text-outline">sync</span>
                         </div>
                         <p className="text-xs font-bold">Database system sync</p>

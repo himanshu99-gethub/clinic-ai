@@ -18,9 +18,9 @@ const LogItem = ({ log }) => {
   const { icon, color, border } = getIconAndColor();
 
   return (
-    <div className="relative pl-8 animate-fade-slide-in">
+    <div className="timeline-item animate-fade-slide-in">
       {/* Icon badge */}
-      <div className={`absolute left-0 top-1 w-6 h-6 rounded-full bg-surface-container-highest flex items-center justify-center border ${border} z-10`}>
+      <div className={`timeline-badge bg-surface-container-highest border ${border}`}>
         <span className={`material-symbols-outlined text-[12px] ${color}`}>
           {icon}
         </span>
@@ -134,7 +134,7 @@ const AgentActivityLog = ({ logs, clinicCount, verifiedCount }) => {
             Real-time Insights
           </h4>
           
-          <div className="space-y-5 relative before:content-[''] before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-[2px] before:bg-outline-variant/10">
+          <div className="timeline-list relative before:content-[''] before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-[2px] before:bg-outline-variant/10">
             {logs.length === 0 ? (
               <div className="py-10 text-center text-on-surface-variant/40 text-xs font-semibold uppercase tracking-wider">
                 Awaiting Scanner Initialization...

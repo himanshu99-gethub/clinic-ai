@@ -10,7 +10,7 @@ const Navbar = ({ activeTab, onTabChange }) => {
   return (
     <>
       {/* Desktop Persistent Sidebar */}
-      <aside className="hidden md:flex flex-col h-screen w-64 fixed left-0 top-0 bg-surface-container-low/60 backdrop-blur-2xl border-r border-outline-variant/10 shadow-lg py-8 z-50">
+      <aside className="desktop-sidebar flex-col bg-surface-container-low/60 backdrop-blur-2xl border-r border-outline-variant/10 shadow-lg py-8">
         {/* Brand Header */}
         <div className="px-6 mb-8 flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-primary-container/20 border border-primary/30 flex items-center justify-center text-primary shadow-[0_0_15px_rgba(46,119,174,0.2)]">
@@ -86,7 +86,7 @@ const Navbar = ({ activeTab, onTabChange }) => {
       </aside>
 
       {/* Mobile Bottom Navigation Bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-surface-container-low/90 backdrop-blur-xl border-t border-outline-variant/20 flex justify-around items-center py-3 z-50">
+      <nav className="desktop-hide fixed bottom-0 left-0 right-0 bg-surface-container-low/90 backdrop-blur-xl border-t border-outline-variant/20 justify-around items-center py-3 z-50">
         {navItems.map((item) => {
           const isActive = activeTab === item.id;
           return (
