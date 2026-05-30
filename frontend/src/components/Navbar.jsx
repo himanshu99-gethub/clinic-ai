@@ -2,110 +2,68 @@ import React from 'react';
 
 const Navbar = ({ activeTab, onTabChange }) => {
   const navItems = [
-    { id: 'dashboard', label: 'Overview', icon: 'dashboard' },
-    { id: 'discovery', label: 'Discovery', icon: 'search' },
-    { id: 'campaigns', label: 'Campaigns', icon: 'send' },
+    { id: 'dashboard', label: 'MISSION DASHBOARD' },
+    { id: 'discovery', label: 'DISCOVERY UNIT' },
+    { id: 'archive', label: 'CONTACT ARCHIVE' }
   ];
 
   return (
-    <>
-      {/* Desktop Persistent Sidebar */}
-      <aside className="desktop-sidebar flex-col bg-surface-container-low/60 backdrop-blur-2xl border-r border-outline-variant/10 shadow-lg py-8">
-        {/* Brand Header */}
-        <div className="px-6 mb-8 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-primary-container/20 border border-primary/30 flex items-center justify-center text-primary shadow-[0_0_15px_rgba(46,119,174,0.2)]">
-            <span className="material-symbols-outlined font-bold">clinical_notes</span>
-          </div>
-          <div>
-            <h1 className="font-headline-md text-[18px] font-bold text-primary leading-none">ClinicFlow AI</h1>
-            <p className="text-[10px] text-on-surface-variant opacity-75 font-medium uppercase tracking-widest mt-1">Healthcare Auto</p>
-          </div>
+    <nav style={{
+      padding: '24px 32px', display: 'flex', justifyContent: 'space-between',
+      alignItems: 'center', position: 'sticky', top: 0, zIndex: 100,
+      background: 'rgba(10,14,20,0.85)', backdropFilter: 'blur(30px)',
+      borderBottom: '1px solid rgba(255,255,255,0.05)'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '40px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ 
+            width: '36px', height: '36px', background: 'linear-gradient(135deg, #2E77AE, #1d5c8a)', 
+            borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', 
+            fontWeight: 900, color: '#fff', boxShadow: '0 0 15px rgba(46, 119, 174, 0.3)' 
+          }}>C</div>
+          <span style={{ fontSize: '15px', fontWeight: 900, color: '#fff', letterSpacing: '2px' }}>
+            CLINICFLOW <span style={{ color: '#2E77AE' }}>AI</span>
+          </span>
         </div>
 
-        {/* Navigation Links */}
-        <nav className="flex-1 px-4 space-y-1">
-          {navItems.map((item) => {
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => onTabChange(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 font-label-md text-sm text-left ${
-                  isActive
-                    ? 'bg-primary-container/20 text-primary border-r-4 border-primary font-semibold'
-                    : 'text-on-surface-variant hover:bg-surface-bright/30 hover:text-on-surface'
-                }`}
-              >
-                <span className="material-symbols-outlined">{item.icon}</span>
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-          
-          {/* Static Tabs for Preview */}
-          <div className="pt-4 border-t border-outline-variant/5 mt-4 space-y-1">
-            <p className="px-4 text-[10px] uppercase font-bold tracking-widest text-outline-variant/60 mb-2">Workspace</p>
-            <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-on-surface-variant/40 cursor-not-allowed text-xs text-left">
-              <span className="material-symbols-outlined text-sm">inbox</span>
-              <span>Inbox (coming soon)</span>
-            </button>
-            <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-on-surface-variant/40 cursor-not-allowed text-xs text-left">
-              <span className="material-symbols-outlined text-sm">account_tree</span>
-              <span>Builder (coming soon)</span>
-            </button>
-          </div>
-        </nav>
-
-        {/* Sidebar Footer */}
-        <div className="px-4 mt-auto space-y-1 pt-4 border-t border-outline-variant/10">
-          <div className="flex items-center gap-3 px-4 py-2 bg-secondary/5 border border-secondary/10 rounded-xl mb-4">
-            <div className="w-2 h-2 rounded-full bg-secondary pulse-orange" />
-            <span className="text-[10px] font-bold text-secondary tracking-wider uppercase">AI Agent Active</span>
-          </div>
-
-          <a
-            href="#"
-            className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-on-surface-variant hover:bg-surface-bright/30 hover:text-on-surface transition-all text-xs"
-            onClick={(e) => e.preventDefault()}
-          >
-            <span className="material-symbols-outlined text-sm">help</span>
-            <span>Help Center</span>
-          </a>
-          <a
-            href="#"
-            className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-on-surface-variant hover:bg-error/10 hover:text-error transition-all text-xs"
-            onClick={(e) => {
-              e.preventDefault();
-              alert('Profile settings and Logout actions can be configured via security credentials.');
-            }}
-          >
-            <span className="material-symbols-outlined text-sm">logout</span>
-            <span>Logout</span>
-          </a>
-        </div>
-      </aside>
-
-      {/* Mobile Bottom Navigation Bar */}
-      <nav className="desktop-hide fixed bottom-0 left-0 right-0 bg-surface-container-low/90 backdrop-blur-xl border-t border-outline-variant/20 justify-around items-center py-3 z-50">
-        {navItems.map((item) => {
-          const isActive = activeTab === item.id;
-          return (
-            <button
+        <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', padding: '5px', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.08)' }}>
+          {navItems.map(item => (
+            <button 
               key={item.id}
               onClick={() => onTabChange(item.id)}
-              className={`flex flex-col items-center gap-1 transition-all ${
-                isActive ? 'text-primary font-boldScale' : 'text-on-surface-variant/70'
-              }`}
+              style={{
+                padding: '10px 28px', border: 'none', borderRadius: '10px',
+                fontSize: '11px', fontWeight: 800, cursor: 'pointer',
+                letterSpacing: '1.5px', transition: 'all 0.3s',
+                background: activeTab === item.id ? 'rgba(46,119,174,0.2)' : 'transparent',
+                color: activeTab === item.id ? '#fff' : 'rgba(255,255,255,0.3)',
+                border: activeTab === item.id ? '1px solid rgba(46,119,174,0.3)' : '1px solid transparent',
+                textTransform: 'uppercase'
+              }}
             >
-              <span className={`material-symbols-outlined ${isActive ? 'filled-icon' : ''}`} style={{ fontVariationSettings: isActive ? "'FILL' 1" : "'FILL' 0" }}>
-                {item.icon}
-              </span>
-              <span className="text-[10px]">{item.label}</span>
+              {item.label}
             </button>
-          );
-        })}
-      </nav>
-    </>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+        <div style={{ 
+          padding: '8px 20px', borderRadius: '30px', background: 'rgba(255,142,43,0.05)',
+          border: '1px solid rgba(255,142,43,0.15)', display: 'flex', alignItems: 'center', gap: '10px'
+        }}>
+          <div className="status-pulse" />
+          <span style={{ fontSize: '11px', fontWeight: 800, color: '#FF8E2B', letterSpacing: '1px' }}>AI NODE ACTIVE</span>
+        </div>
+        
+        <div style={{
+          width: '42px', height: '42px', borderRadius: '12px',
+          background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px',
+          cursor: 'pointer'
+        }}>👤</div>
+      </div>
+    </nav>
   );
 };
 

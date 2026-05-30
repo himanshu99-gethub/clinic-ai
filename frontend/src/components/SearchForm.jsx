@@ -5,100 +5,106 @@ const SearchForm = ({ onSearch, isLoading }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!query.specialization || !query.city) {
-      alert('Please specify specialization and target city to scan.');
-      return;
-    }
     onSearch(query);
   };
 
+  const inputStyle = {
+    width: '100%', padding: '16px 20px 16px 48px',
+    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: '12px', color: '#fff', fontSize: '14px', fontWeight: 500,
+    outline: 'none', transition: 'all 0.3s', fontFamily: 'inherit'
+  };
+
+  const labelStyle = {
+    display: 'block', fontSize: '10px', fontWeight: 800,
+    color: '#2E77AE', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '10px'
+  };
+
   const fields = [
-    { key: 'specialization', label: 'Clinical Specialty', placeholder: 'e.g. Pediatric Cardiology', icon: 'clinical_notes' },
-    { key: 'city', label: 'Target City', placeholder: 'e.g. Boston', icon: 'distance' },
-    { key: 'country', label: 'Country / Region', placeholder: 'e.g. USA', icon: 'public' },
+    { key: 'specialization', label: 'Clinical Specialization', placeholder: 'e.g. Dental Clinic', icon: '🩺' },
+    { key: 'city', label: 'Target City', placeholder: 'e.g. New York', icon: '🏙️' },
+    { key: 'country', label: 'Country / Region', placeholder: 'e.g. USA', icon: '🌍' },
   ];
 
   return (
-    <div className="glass-card rounded-2xl p-8 relative overflow-hidden transition-all duration-300">
-      {/* Background soft glow */}
-      <div className="absolute -top-12 -right-12 w-48 h-48 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="mb-6">
-        <h2 className="font-headline-md text-headline-md text-on-surface font-bold">Discovery Scanner</h2>
-        <p className="font-caption text-xs text-on-surface-variant/80 mt-1">
-          Configure Google Maps crawler parameters to identify healthcare nodes
-        </p>
+    <div className="glass-panel" style={{
+      padding: '40px', marginBottom: '40px', position: 'relative', overflow: 'hidden'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '40px' }}>
+        <div>
+          <h2 style={{ fontSize: '24px', fontWeight: 900, color: '#fff', letterSpacing: '-1px' }}>
+            Discovery Unit
+          </h2>
+          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginTop: '4px' }}>
+            Initialize healthcare node scanning protocol
+          </p>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {fields.map(({ key, label, placeholder, icon }) => (
-            <div key={key} className="space-y-2">
-              <label className="block text-[10px] uppercase font-bold tracking-widest text-primary-container">
-                {label}
-              </label>
-              <div className="relative">
-                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline-variant text-lg">
-                  {icon}
-                </span>
-                <input
-                  type="text"
-                  placeholder={placeholder}
-                  className="w-full bg-surface-container-highest/30 border border-outline-variant/30 rounded-xl py-3 pl-10 pr-4 text-sm text-on-surface placeholder:text-outline/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all font-sans"
-                  value={query[key]}
-                  onChange={e => setQuery({ ...query, [key]: e.target.value })}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* AI Auto outreach toggle panel */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 bg-surface-container-low/40 rounded-2xl border border-outline-variant/10 gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-secondary/15 flex items-center justify-center text-secondary pulse-orange">
-              <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>smart_toy</span>
-            </div>
-            <div>
-              <p className="text-sm font-bold text-on-surface">Auto-Pilot Outreach</p>
-              <p className="text-xs text-on-surface-variant/70 mt-0.5">Automatically trigger email sequence upon verified search results</p>
+      <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '28px' }}>
+        {fields.map(({ key, label, placeholder, icon }) => (
+          <div key={key}>
+            <label style={labelStyle}>{label}</label>
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: '18px', top: '50%', transform: 'translateY(-50%)', fontSize: '18px', opacity: 0.5 }}>{icon}</span>
+              <input
+                type="text"
+                placeholder={placeholder}
+                style={inputStyle}
+                value={query[key]}
+                onChange={e => setQuery({ ...query, [key]: e.target.value })}
+                onFocus={e => { e.target.style.borderColor = '#2E77AE'; e.target.style.boxShadow = '0 0 15px rgba(46,119,174,0.2)'; }}
+                onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.08)'; e.target.style.boxShadow = 'none'; }}
+              />
             </div>
           </div>
-          
-          {/* Toggle Switch */}
-          <label className="relative inline-flex items-center cursor-pointer select-none">
+        ))}
+
+        <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '24px', background: 'rgba(0,0,0,0.2)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{ fontSize: '28px' }}>🤖</div>
+            <div>
+              <p style={{ color: '#fff', fontSize: '14px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>Automated Agent Protocol</p>
+              <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', fontWeight: 600, marginTop: '2px' }}>Agent will execute outreach sequence upon node verification</p>
+            </div>
+          </div>
+          <label style={{ position: 'relative', display: 'inline-block', width: '56px', height: '28px', cursor: 'pointer' }}>
             <input 
               type="checkbox" 
-              className="sr-only peer"
+              style={{ opacity: 0, width: 0, height: 0 }}
               checked={query.auto_outreach}
               onChange={e => setQuery({ ...query, auto_outreach: e.target.checked })}
             />
-            <div className="w-14 h-7 bg-surface-container-highest peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container peer-checked:shadow-[0_0_12px_rgba(46,119,174,0.4)]"></div>
+            <span style={{
+              position: 'absolute', cursor: 'pointer', inset: 0,
+              backgroundColor: query.auto_outreach ? '#2E77AE' : 'rgba(255,255,255,0.1)',
+              transition: '.4s', borderRadius: '34px',
+              boxShadow: query.auto_outreach ? '0 0 15px rgba(46,119,174,0.4)' : 'none'
+            }}>
+              <span style={{
+                position: 'absolute', content: '""', height: '20px', width: '20px',
+                left: query.auto_outreach ? '32px' : '4px', bottom: '4px',
+                backgroundColor: 'white', transition: '.4s', borderRadius: '50%'
+              }} />
+            </span>
           </label>
         </div>
 
-        {/* Submit launch button */}
-        <div>
+        <div style={{ gridColumn: '1 / -1' }}>
           <button
             type="submit"
             disabled={isLoading}
-            className={`w-full py-4 px-6 rounded-xl font-bold uppercase tracking-wider text-sm transition-all duration-300 flex items-center justify-center gap-3 cursor-pointer ${
-              isLoading
-                ? 'bg-primary/20 text-primary-container cursor-not-allowed border border-primary/10'
-                : 'bg-primary-container text-on-primary-container hover:opacity-90 active:scale-[0.99] shadow-[0_4px_20px_rgba(46,119,174,0.25)] hover:shadow-[0_4px_25px_rgba(46,119,174,0.4)]'
-            }`}
+            className="glow-btn"
+            style={{
+              width: '100%', padding: '18px',
+              background: isLoading ? 'rgba(46,119,174,0.5)' : '#2E77AE',
+              border: 'none', borderRadius: '12px', color: '#fff',
+              fontSize: '14px', fontWeight: 900, cursor: isLoading ? 'not-allowed' : 'pointer',
+              letterSpacing: '3px', transition: 'all 0.3s',
+              textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px'
+            }}
           >
-            {isLoading ? (
-              <>
-                <div className="w-5 h-5 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
-                <span>Running Scan Protocol...</span>
-              </>
-            ) : (
-              <>
-                <span className="material-symbols-outlined text-lg">bolt</span>
-                <span>Launch Grid Discovery</span>
-              </>
-            )}
+            {isLoading ? '⏳ SCANNING GRID...' : '🚀 Launch Discovery'}
           </button>
         </div>
       </form>
