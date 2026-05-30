@@ -32,7 +32,7 @@ const outreachBadge = (status) => {
   );
 };
 
-const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach, isSending }) => {
+const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach, isSending, onClearAll }) => {
   const [filter, setFilter] = React.useState('All');
 
   const filteredClinics = clinics.filter(c => {
@@ -109,6 +109,26 @@ const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach, isSending }) =>
           >
             📊 Export to Excel
           </button>
+          {onClearAll && clinics.length > 0 && (
+            <button 
+              onClick={() => {
+                if (window.confirm("Are you sure you want to delete all clinical leads? This will clear the entire database!")) {
+                  onClearAll();
+                }
+              }}
+              style={{
+                padding: '10px 20px', background: 'rgba(239,68,68,0.1)',
+                border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px',
+                color: '#ff8b8b', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '6px', fontFamily: 'inherit',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.2)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
+            >
+              🗑️ Clear All Leads
+            </button>
+          )}
         </div>
       </div>
 

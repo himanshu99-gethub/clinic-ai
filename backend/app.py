@@ -749,6 +749,30 @@ def get_clinics():
         log(f"Clinics endpoint error: {str(e)}", "ERROR")
         return jsonify({"error": "Internal server error"}), 500
 
+@app.route('/api/clinics', methods=['DELETE'])
+def clear_all_clinics():
+    """Clear all clinics from database and memory file."""
+    global live_db
+    try:
+        # Clear MongoDB collection
+        if clinics_collection is not None:
+            clinics_collection.delete_many({})
+            log("✓ Cleared all clinics from MongoDB", "OK")
+            
+        # Clear memory db
+        live_db = []
+        save_data()
+        log("✓ Cleared all clinics from memory and file storage", "OK")
+        
+        # Add entry to logs
+        add_log("🗑️ Database Cleared: All clinical leads deleted by administrator.")
+        
+        return jsonify({"message": "All clinical leads successfully deleted."}), 200
+        
+    except Exception as e:
+        log(f"Error clearing clinics: {str(e)}", "ERROR")
+        return jsonify({"error": f"Failed to clear database: {str(e)}"}), 500
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """Get statistics about clinic discovery."""

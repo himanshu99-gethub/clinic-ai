@@ -393,6 +393,20 @@ ClinicFlow AI | Lead Developer`;
     URL.revokeObjectURL(url);
   };
 
+  const handleClearAll = async () => {
+    try {
+      const res = await axios.delete(`${API_BASE_URL}/clinics`);
+      setMessage(`🗑️ ${res.data.message || 'All leads deleted successfully.'}`);
+      setClinics([]);
+      setStats({ total: 0, verified: 0, unverified: 0, contacted: 0, pending: 0 });
+      setTimeout(() => setMessage(''), 5000);
+    } catch (e) {
+      console.error(e);
+      setMessage('❌ Failed to clear database: ' + (e.response?.data?.error || e.message));
+      setTimeout(() => setMessage(''), 5000);
+    }
+  };
+
   const statsData = [
     { title: 'Global Nodes', value: stats.total, icon: '🏥', color: 'blue' },
     { title: 'Node Verified', value: stats.verified, icon: '✅', color: 'blue' },
@@ -523,6 +537,7 @@ ClinicFlow AI | Lead Developer`;
                 onAnalyze={handleAnalyze} 
                 onOutreach={handleOutreach}
                 isSending={sending}
+                onClearAll={handleClearAll}
               />
             </>
           )}
@@ -593,6 +608,7 @@ ClinicFlow AI | Lead Developer`;
                     onAnalyze={handleAnalyze} 
                     onOutreach={handleOutreach}
                     isSending={sending}
+                    onClearAll={handleClearAll}
                   />
                 </div>
               </div>
