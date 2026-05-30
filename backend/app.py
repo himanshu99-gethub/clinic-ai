@@ -255,8 +255,12 @@ def auto_send(clinic, template=None):
         
         # Connect and send
         log(f"SMTP: Connecting to {email_host}:{email_port}...", "INFO")
-        server = smtplib.SMTP(email_host, email_port)
-        server.starttls()
+        if email_port == 465:
+            server = smtplib.SMTP_SSL(email_host, email_port, timeout=15)
+        else:
+            server = smtplib.SMTP(email_host, email_port, timeout=15)
+            server.starttls()
+            
         log("SMTP: Logging in...", "INFO")
         server.login(email_user, email_pass)
         log(f"SMTP: Sending email to {recipient_email}...", "INFO")
@@ -852,6 +856,34 @@ def health_check():
         }), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/send-test-email', methods=['POST'])
+def send_test_email():
+    """Send a single test email to verify SMTP credentials."""
+    try:
+        data = request.json or {}
+        test_email = data.get('email', '').strip()
+        template = data.get('template', '')
+        
+        if not test_email:
+            return jsonify({"error": "Test email address is required"}), 400
+            
+        test_clinic = {
+            "name": "Test Clinic",
+            "email": test_email,
+            "website": "http://example.com"
+        }
+        
+        log(f"TEST_EMAIL: Attempting to send test outreach email to {test_email}", "INFO")
+        success = auto_send(test_clinic, template)
+        
+        if success:
+            return jsonify({"message": f"Test email successfully sent to {test_email}!"}), 200
+        else:
+            return jsonify({"error": "Failed to send email. Check backend logs/configurations."}), 500
+    except Exception as e:
+        log(f"TEST_EMAIL_ERR: {str(e)}", "ERROR")
+        return jsonify({"error": f"Error initiating test: {str(e)}"}), 500
 
 if __name__ == '__main__':
     log("=" * 60, "OK")

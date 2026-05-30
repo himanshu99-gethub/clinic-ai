@@ -32,6 +32,28 @@ const TemplateEditor = ({ template, onSave }) => {
   const [val, setVal] = useState(template);
   const [prompt, setPrompt] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [testEmail, setTestEmail] = useState('');
+  const [testingEmail, setTestingEmail] = useState(false);
+
+  const handleSendTest = async () => {
+    if (!testEmail) {
+      alert('Please enter a recipient email address');
+      return;
+    }
+    setTestingEmail(true);
+    try {
+      const res = await axios.post(`${API_BASE_URL}/send-test-email`, {
+        email: testEmail,
+        template: val
+      });
+      alert(res.data.message || 'Test email sent successfully!');
+    } catch (e) {
+      console.error(e);
+      alert('Failed to send test email: ' + (e.response?.data?.error || e.message));
+    } finally {
+      setTestingEmail(false);
+    }
+  };
 
   // Keep local state in sync with saved protocol
   useEffect(() => {
@@ -99,6 +121,42 @@ const TemplateEditor = ({ template, onSave }) => {
             }}
           >
             {generating ? '⌛ Thinking...' : 'Email Generate'}
+          </button>
+        </div>
+      </div>
+
+      {/* Test Email Tool */}
+      <div style={{ 
+        background: 'rgba(255,142,43,0.05)', border: '1px solid rgba(255,142,43,0.15)',
+        padding: '20px', borderRadius: '16px', marginBottom: '24px'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <p style={{ fontSize: '11px', color: '#FF8E2B', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>
+            🧪 Send Test Email
+          </p>
+          {testingEmail && <span style={{ fontSize: '10px', color: '#4ade80', fontWeight: 800, animation: 'pulse 1s infinite' }}>SENDING TEST...</span>}
+        </div>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <input 
+            value={testEmail}
+            onChange={(e) => setTestEmail(e.target.value)}
+            placeholder="Enter recipient email (e.g. your_email@gmail.com)..."
+            style={{
+              flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)',
+              borderRadius: '10px', padding: '10px 16px', color: '#fff', fontSize: '13px', outline: 'none'
+            }}
+          />
+          <button 
+            onClick={handleSendTest}
+            disabled={testingEmail}
+            style={{
+              padding: '10px 20px', background: testingEmail ? 'rgba(255,255,255,0.1)' : 'rgba(255,142,43,0.2)', 
+              border: '1px solid rgba(255,142,43,0.3)',
+              borderRadius: '10px', color: '#fff', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+              transition: 'all 0.2s', textTransform: 'uppercase'
+            }}
+          >
+            {testingEmail ? '⌛ Sending...' : 'Send Test'}
           </button>
         </div>
       </div>
@@ -229,43 +287,58 @@ ClinicFlow AI | Lead Developer`);
   };
 
   const handleOutreach = async () => {
-    if (!clinics.length) {
-      setMessage('❌ ERROR: No clinics to contact. Run a discovery scan first.');
+    const clinicsWithEmail = clinics.filter(c => c.email && c.email.trim() !== '');
+    
+    if (!clinicsWithEmail.length) {
+      setMessage('⚠️ WARNING: No clinics with email addresses found.');
+      setTimeout(() => setMessage(''), 5000);
       return;
     }
     
     setSending(true);
-    setMessage('⏳ Bulk email outreach in progress... Please wait.');
-    try {
-      const clinicsWithEmail = clinics.filter(c => c.email && c.email.trim() !== '');
+    let successCount = 0;
+    let failCount = 0;
+    
+    // Loop through each clinic and send email individually
+    for (let i = 0; i < clinicsWithEmail.length; i++) {
+      const clinic = clinicsWithEmail[i];
+      const progressMessage = `⏳ Sending email ${i + 1}/${clinicsWithEmail.length} to ${clinic.name}...`;
+      setMessage(progressMessage);
       
-      if (!clinicsWithEmail.length) {
-        setMessage('⚠️ WARNING: No clinics with email addresses found.');
-        setSending(false);
-        setTimeout(() => setMessage(''), 5000);
-        return;
+      try {
+        const res = await axios.post(`${API_BASE_URL}/outreach`, {
+          clinic_names: [clinic.name],
+          template: globalTemplate
+        });
+        
+        if (res.data.contacted > 0) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } catch (e) {
+        console.error(`Error sending to ${clinic.name}:`, e);
+        failCount++;
       }
       
-      const res = await axios.post(`${API_BASE_URL}/outreach`, {
-        clinic_names: clinicsWithEmail.map(c => c.name),
-        template: globalTemplate
-      });
-      
-      setMessage(`✅ SUCCESS: Bulk email outreach completed. Sent: ${res.data.contacted}, Failed: ${res.data.failed}`);
-      
-      // Refresh data
-      setTimeout(() => {
-        fetchData(activeFilter);
-      }, 1000);
-      
-      setTimeout(() => setMessage(''), 6000);
-    } catch (e) {
-      console.error('[Outreach Error]', e);
-      setMessage(`❌ ERROR: ${e.response?.data?.error || 'Outreach protocol failed'}`);
-      setTimeout(() => setMessage(''), 6000);
-    } finally {
-      setSending(false);
+      // Update local state to show "Contacted" immediately in the UI grid
+      setClinics(prev => prev.map(c => {
+        if (c.name === clinic.name) {
+          return { ...c, outreach_status: 'Contacted' };
+        }
+        return c;
+      }));
     }
+    
+    setMessage(`✅ SUCCESS: Bulk email outreach completed. Sent: ${successCount}, Failed: ${failCount}`);
+    setSending(false);
+    
+    // Refresh database sync after a short delay
+    setTimeout(() => {
+      fetchData(activeFilter);
+    }, 2000);
+    
+    setTimeout(() => setMessage(''), 10000);
   };
 
   const handleExport = () => {
