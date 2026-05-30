@@ -43,6 +43,17 @@ class ClinicScraper:
             options.add_argument("--disable-extensions")
             options.add_argument("--window-size=1920,1080")
             options.add_argument("--start-maximized")
+            
+            # Prevent connection issues on limited Linux containers
+            options.add_argument("--remote-debugging-port=9222")
+            
+            # Check for Render custom Chrome binary path
+            import os
+            render_chrome_path = "/opt/render/project/.render/chrome/opt/google/chrome/google-chrome"
+            if os.path.exists(render_chrome_path):
+                log(f"Render custom Chrome path detected: {render_chrome_path}", "INFO")
+                options.binary_location = render_chrome_path
+            
             # No image blocking or eager page load strategy, as Google Maps requires them to render search panels
             
             self.driver = webdriver.Chrome(options=options)
