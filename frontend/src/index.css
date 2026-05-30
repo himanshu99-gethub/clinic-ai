@@ -1,75 +1,188 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --color-clinic-dark: #0A0E14;
-  --color-clinic-surface: #1A1D23;
-  --color-clinic-primary: #2E77AE;
-  --color-clinic-accent: #FF8E2B;
-  --color-clinic-light: #E1E2E7;
+  /* Stitch Theme Colors */
+  --color-background: #00142a;
+  --color-primary: #96ccff;
+  --color-primary-container: #2e77ae;
+  --color-on-primary-container: #f6f9ff;
+  
+  --color-secondary: #ffb783;
+  --color-secondary-container: #de750a;
+  
+  --color-surface-container-lowest: #000f21;
+  --color-surface-container-low: #081c32;
+  --color-surface-container: #0c2036;
+  --color-surface-container-high: #182b41;
+  --color-surface-container-highest: #23364d;
+  --color-surface-bright: #283a51;
+  
+  --color-on-surface: #d2e4ff;
+  --color-on-surface-variant: #c0c7d1;
+  
+  --color-outline: #8a919a;
+  --color-outline-variant: #41474f;
+  
+  --color-error: #ffb4ab;
+  --color-error-container: #93000a;
+  
+  --color-tertiary: #bec8d2;
+  --color-tertiary-container: #69737d;
+  --color-inverse-primary: #0a6399;
+  
+  /* Fonts */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-body-md: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-headline-md: 'Manrope', sans-serif;
+  --font-headline-lg: 'Manrope', sans-serif;
+  --font-display-lg: 'Manrope', sans-serif;
+  --font-caption: 'Inter', sans-serif;
+  --font-label-md: 'Inter', sans-serif;
+
+  /* Border Radius overrides */
+  --radius-DEFAULT: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-full: 9999px;
+
+  /* Font size definitions to align with design spec */
+  --size-caption: 12px;
+  --size-label-md: 14px;
+  --size-headline-md: 24px;
+  --size-headline-lg: 32px;
+  --size-display-lg: 48px;
+  --size-body-lg: 18px;
+  --size-body-md: 16px;
 }
 
 :root {
-  --glass-bg: rgba(26, 29, 35, 0.6);
-  --glass-border: rgba(255, 255, 255, 0.05);
-  --glow-primary: rgba(46, 119, 174, 0.4);
-  --glow-accent: rgba(255, 142, 43, 0.4);
+  --margin-desktop: 40px;
+  --margin-mobile: 20px;
+  --gutter: 24px;
+  --stack-sm: 8px;
+  --stack-md: 16px;
+  --stack-lg: 32px;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 html, body {
-  background: #0A0E14;
-  color: #E1E2E7;
+  background-color: #00142a;
+  color: #d2e4ff;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
   overflow-x: hidden;
 }
 
-.glass-panel {
-  background: var(--glass-bg);
+/* Material Symbols Outlined Custom configurations */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+}
+
+/* Glass UI Elements */
+.glass-card {
+  background: rgba(224, 234, 245, 0.08);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
+  border: 1px solid rgba(224, 234, 245, 0.1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card-hover:hover {
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+  box-shadow: 0 0 25px 0 rgba(46, 119, 174, 0.15);
+  border-color: rgba(150, 204, 255, 0.2);
+}
+
+.glass-panel {
+  background: rgba(224, 234, 245, 0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(224, 234, 245, 0.1);
   border-radius: 16px;
   transition: all 0.3s ease;
 }
 
-.glass-panel:hover {
-  border-color: rgba(46, 119, 174, 0.3);
-  box-shadow: 0 0 15px rgba(46, 119, 174, 0.1);
+.glass-panel-heavy {
+  background: rgba(8, 28, 50, 0.6);
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+  border: 1px solid rgba(224, 234, 245, 0.15);
 }
 
-.glow-btn {
-  position: relative;
-  overflow: hidden;
-  transition: all 0.3s ease;
+.glass-row:hover {
+  background: rgba(224, 234, 245, 0.12);
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+  box-shadow: 0 0 20px 0 rgba(46, 119, 174, 0.15);
 }
 
-.glow-btn:hover {
-  box-shadow: 0 0 20px var(--glow-primary);
-  transform: translateY(-1px);
+/* AI UI Glows */
+.ai-glow {
+  box-shadow: 0 0 20px 0 rgba(46, 119, 174, 0.15);
 }
 
-.status-pulse {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-clinic-accent);
-  box-shadow: 0 0 10px var(--color-clinic-accent);
+.ai-pulse {
+  box-shadow: 0 0 0 0 rgba(255, 142, 43, 0.4);
   animation: pulse 2s infinite;
 }
 
-@keyframes pulse {
-  0% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.5); opacity: 0.5; }
-  100% { transform: scale(1); opacity: 1; }
+.pulse-orange {
+  animation: pulse-orange 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: #0A0E14; }
-::-webkit-scrollbar-thumb { background: #1A1D23; border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: #2E77AE; }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 142, 43, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(255, 142, 43, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 142, 43, 0); }
+}
 
-::selection { background: rgba(46,119,174,0.3); color: #fff; }
+@keyframes pulse-orange {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .7; transform: scale(1.1); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-slide-in {
+  animation: fadeSlideIn 0.4s ease-out forwards;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(150, 204, 255, 0.1);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(150, 204, 255, 0.25);
+}
+
+/* Selection style */
+::selection {
+  background: rgba(150, 204, 255, 0.25);
+  color: #fff;
+}
