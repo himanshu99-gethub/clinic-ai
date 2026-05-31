@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from pymongo import MongoClient, errors
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import os
 import time
 import threading
@@ -40,35 +41,72 @@ def log(msg, level="INFO"):
     sys.stdout.flush()  # Explicit flush for daemon threads
 
 # ────────────────────────────────────────────────────────────
-# MONGODB CONFIGURATION
+# SUPABASE / POSTGRESQL CONFIGURATION
 # ────────────────────────────────────────────────────────────
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-clinics_collection = None
-settings_collection = None
-client = None
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
+postgres_connected = False
 
-try:
-    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    db = client["clinic_discovery"]
-    clinics_collection = db["clinics"]
-    settings_collection = db["settings"]
-    
-    # Verify connection
-    client.server_info()
-    
-    # Create indexes for performance
-    clinics_collection.create_index([("name", 1), ("city", 1)], unique=False)
-    clinics_collection.create_index([("specialization", 1)])
-    clinics_collection.create_index([("discovery_date", -1)])
-    
-    log("✓ Connected to MongoDB successfully", "OK")
-    log("✓ Indexes created", "OK")
-except Exception as e:
-    error_msg = f"MongoDB Connection Failed: {str(e)}\n{traceback.format_exc()}"
-    log(error_msg, "ERROR")
-    clinics_collection = None
-    settings_collection = None
+def get_db_connection():
+    """Establish a connection to Supabase/Postgres."""
+    if not DATABASE_URL:
+        return None
+    try:
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        return conn
+    except Exception as e:
+        log(f"Supabase connection failed: {e}", "ERROR")
+        return None
+
+# Self-initialize database tables
+if DATABASE_URL:
+    try:
+        conn = get_db_connection()
+        if conn:
+            cur = conn.cursor()
+            
+            # Create settings table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key VARCHAR(255) PRIMARY KEY,
+                    value TEXT
+                );
+            """)
+            
+            # Create clinics table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS clinics (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    city VARCHAR(100) NOT NULL,
+                    country VARCHAR(100),
+                    specialization VARCHAR(100),
+                    address TEXT,
+                    phone VARCHAR(100),
+                    website TEXT,
+                    email VARCHAR(255),
+                    status VARCHAR(50),
+                    outreach_status VARCHAR(50),
+                    discovery_date VARCHAR(50),
+                    UNIQUE (name, city)
+                );
+            """)
+            
+            # Create indexes
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_clinics_specialization ON clinics(specialization);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_clinics_discovery ON clinics(discovery_date DESC);")
+            
+            conn.commit()
+            cur.close()
+            conn.close()
+            log("✓ Connected to Supabase (Postgres) successfully", "OK")
+            postgres_connected = True
+        else:
+            log("Supabase connection failed: get_db_connection returned None", "ERROR")
+    except Exception as e:
+        log(f"Failed to initialize Supabase tables: {e}\n{traceback.format_exc()}", "ERROR")
+else:
+    log("DATABASE_URL or SUPABASE_DB_URL is not set in environment. Running on file storage fallback only.", "WARNING")
 
 # ────────────────────────────────────────────────────────────
 # PERSISTENT FILE STORAGE (survives restarts)
@@ -92,18 +130,24 @@ DEFAULT_TEMPLATE = (
 )
 
 def load_template(verbose=True):
-    """Load the email template from MongoDB or local JSON fallback."""
-    # 1. Try MongoDB
-    if settings_collection is not None:
+    """Load the email template from Supabase or local JSON fallback."""
+    # 1. Try Supabase
+    if postgres_connected:
         try:
-            doc = settings_collection.find_one({"key": "outreach_template"})
-            if doc and "value" in doc:
-                if verbose:
-                    log("Loaded email template from MongoDB settings", "OK")
-                return doc["value"]
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("SELECT value FROM settings WHERE key = 'outreach_template';")
+                row = cur.fetchone()
+                cur.close()
+                conn.close()
+                if row:
+                    if verbose:
+                        log("Loaded email template from Supabase settings", "OK")
+                    return row[0]
         except Exception as e:
             if verbose:
-                log(f"Could not load template from MongoDB: {e}", "WARNING")
+                log(f"Could not load template from Supabase: {e}", "WARNING")
                 
     # 2. Try JSON file fallback
     try:
@@ -124,20 +168,27 @@ def load_template(verbose=True):
     return DEFAULT_TEMPLATE
 
 def save_template(template_content):
-    """Save the email template to MongoDB and local JSON fallback."""
-    # 1. Try MongoDB
-    mongo_success = False
-    if settings_collection is not None:
+    """Save the email template to Supabase and local JSON fallback."""
+    # 1. Try Supabase
+    db_success = False
+    if postgres_connected:
         try:
-            settings_collection.replace_one(
-                {"key": "outreach_template"},
-                {"key": "outreach_template", "value": template_content},
-                upsert=True
-            )
-            log("Saved email template to MongoDB successfully", "OK")
-            mongo_success = True
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO settings (key, value) 
+                    VALUES ('outreach_template', %s)
+                    ON CONFLICT (key) 
+                    DO UPDATE SET value = EXCLUDED.value;
+                """, (template_content,))
+                conn.commit()
+                cur.close()
+                conn.close()
+                log("Saved email template to Supabase successfully", "OK")
+                db_success = True
         except Exception as e:
-            log(f"Could not save template to MongoDB: {e}", "WARNING")
+            log(f"Could not save template to Supabase: {e}", "WARNING")
             
     # 2. Try JSON file
     try:
@@ -155,7 +206,7 @@ def save_template(template_content):
         return True
     except Exception as e:
         log(f"Could not save settings file: {e}", "WARNING")
-        return mongo_success
+        return db_success
 
 def load_data(verbose=True):
     """Load clinics from JSON file."""
@@ -252,27 +303,42 @@ def is_duplicate_clinic(clinic_data, exclude_name=None):
                 log(f"Duplicate found by email: {email}", "INFO")
                 return True
                 
-    # Check MongoDB
-    if clinics_collection is not None:
+    # Check Supabase
+    if postgres_connected:
         try:
-            or_conditions = [{"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}]
-            if phone:
-                or_conditions.append({"phone": phone})
-            if website:
-                or_conditions.append({"website": {"$regex": f"^{re.escape(website)}$", "$options": "i"}})
-            if email:
-                or_conditions.append({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
                 
-            query = {"$or": or_conditions}
-            if exclude_name:
-                query = {"$and": [query, {"name": {"$not": re.compile(f"^{re.escape(exclude_name)}$", re.IGNORECASE)}}]}
+                # Build OR conditions
+                query = "SELECT name FROM clinics WHERE LOWER(name) = %s"
+                params = [name]
                 
-            existing = clinics_collection.find_one(query)
-            if existing:
-                log(f"Duplicate found in MongoDB for query: {query}", "INFO")
-                return True
+                if phone:
+                    query += " OR phone = %s"
+                    params.append(phone)
+                if website:
+                    query += " OR LOWER(website) LIKE %s"
+                    params.append(f"%{web_clean}%")
+                if email:
+                    query += " OR LOWER(email) = %s"
+                    params.append(email)
+                
+                # If excluding specific name
+                if exclude_name:
+                    query = f"SELECT name FROM ({query}) AS sub WHERE LOWER(name) != %s"
+                    params.append(exclude_name.lower())
+                    
+                cur.execute(query, params)
+                existing = cur.fetchone()
+                cur.close()
+                conn.close()
+                
+                if existing:
+                    log(f"Duplicate found in Supabase: {existing[0]}", "INFO")
+                    return True
         except Exception as e:
-            log(f"MongoDB duplicate check failed: {e}", "WARNING")
+            log(f"Supabase duplicate check failed: {e}", "WARNING")
             
     return False
 
@@ -446,12 +512,19 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
     save_data()
     log("Cleared previous clinics from memory and file storage.", "INFO")
     
-    if clinics_collection is not None:
+    if postgres_connected:
         try:
-            delete_res = clinics_collection.delete_many({})
-            log(f"Cleared MongoDB: deleted {delete_res.deleted_count} previous clinics to start fresh search.", "INFO")
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM clinics;")
+                conn.commit()
+                deleted_count = cur.rowcount
+                cur.close()
+                conn.close()
+                log(f"Cleared Supabase: deleted {deleted_count} previous clinics to start fresh search.", "INFO")
         except Exception as e:
-            log(f"Failed to clear MongoDB clinics for new search: {e}", "WARNING")
+            log(f"Failed to clear Supabase clinics for new search: {e}", "WARNING")
 
     scraper = None
     try:
@@ -548,8 +621,17 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                     global live_db
                     live_db = [c for c in live_db if c["name"].lower() != name.lower()]
                     save_data()
-                    if clinics_collection is not None:
-                        clinics_collection.delete_one({"name": name, "city": city})
+                    if postgres_connected:
+                        try:
+                            conn = get_db_connection()
+                            if conn:
+                                cur = conn.cursor()
+                                cur.execute("DELETE FROM clinics WHERE name = %s AND city = %s;", (name, city))
+                                conn.commit()
+                                cur.close()
+                                conn.close()
+                        except Exception as ex:
+                            log(f"Failed to delete clinic from Supabase: {ex}", "WARNING")
                     return
 
                 log(f"[PROCESS_EXTRACT] Attempting email extraction for {name} with website: {website}", "INFO")
@@ -566,8 +648,17 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                         log(f"🗑️ REJECTED - Email '{email}' is already associated with another clinic.", "WARNING")
                         live_db = [c for c in live_db if c["name"].lower() != name.lower()]
                         save_data()
-                        if clinics_collection is not None:
-                            clinics_collection.delete_one({"name": name, "city": city})
+                        if postgres_connected:
+                            try:
+                                conn = get_db_connection()
+                                if conn:
+                                    cur = conn.cursor()
+                                    cur.execute("DELETE FROM clinics WHERE name = %s AND city = %s;", (name, city))
+                                    conn.commit()
+                                    cur.close()
+                                    conn.close()
+                            except Exception as ex:
+                                log(f"Failed to delete clinic from Supabase: {ex}", "WARNING")
                         add_log(f"🗑️ Removed duplicate clinic (matching email): {name}")
                         return
                     
@@ -587,17 +678,46 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                 else:
                     log(f"[PROCESS_EMAIL_EMPTY] Email extraction returned empty", "WARNING")
                 
-                # Store or update in MongoDB
-                if clinics_collection is not None:
+                # Store or update in Supabase
+                if postgres_connected:
                     try:
-                        clinics_collection.replace_one(
-                            {"name": name, "city": city},
-                            clinic_ref,
-                            upsert=True
-                        )
-                        log(f"[PROCESS_MONGO_SAVED] Saved to MongoDB", "INFO")
+                        conn = get_db_connection()
+                        if conn:
+                            cur = conn.cursor()
+                            cur.execute("""
+                                INSERT INTO clinics (
+                                    name, city, country, specialization, address, 
+                                    phone, website, email, status, outreach_status, discovery_date
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (name, city) DO UPDATE SET
+                                    country = EXCLUDED.country,
+                                    specialization = EXCLUDED.specialization,
+                                    address = EXCLUDED.address,
+                                    phone = EXCLUDED.phone,
+                                    website = EXCLUDED.website,
+                                    email = EXCLUDED.email,
+                                    status = EXCLUDED.status,
+                                    outreach_status = EXCLUDED.outreach_status,
+                                    discovery_date = EXCLUDED.discovery_date;
+                            """, (
+                                clinic_ref.get("name"),
+                                clinic_ref.get("city"),
+                                clinic_ref.get("country"),
+                                clinic_ref.get("specialization"),
+                                clinic_ref.get("address"),
+                                clinic_ref.get("phone"),
+                                clinic_ref.get("website"),
+                                clinic_ref.get("email"),
+                                clinic_ref.get("status"),
+                                clinic_ref.get("outreach_status"),
+                                clinic_ref.get("discovery_date")
+                            ))
+                            conn.commit()
+                            cur.close()
+                            conn.close()
+                            log(f"[PROCESS_SUPABASE_SAVED] Saved to Supabase", "INFO")
                     except Exception as e:
-                        log(f"[PROCESS_MONGO_ERROR] MongoDB error: {e}", "WARNING")
+                        log(f"[PROCESS_SUPABASE_ERROR] Supabase error: {e}", "WARNING")
                 
                 save_data()
                 log(f"[PROCESS_SAVED] Data persisted to JSON", "OK")
@@ -780,24 +900,42 @@ def get_clinics():
         
         data = []
         
-        # Try to fetch from MongoDB first
-        if clinics_collection is not None:
+        # Try to fetch from Supabase first
+        if postgres_connected:
             try:
-                query = {}
-                if city:
-                    query['city'] = {"$regex": city, "$options": "i"}
-                if spec:
-                    query['specialization'] = {"$regex": spec, "$options": "i"}
-                if status_filter in ['Verified', 'Unverified']:
-                    query['status'] = status_filter
-                
-                mongo_data = list(clinics_collection.find(query, {"_id": 0}).sort("discovery_date", -1).limit(100))
-                data.extend(mongo_data)
-                log(f"Fetched {len(mongo_data)} clinics from MongoDB", "OK")
+                conn = get_db_connection()
+                if conn:
+                    cur = conn.cursor(cursor_factory=RealDictCursor)
+                    query = "SELECT name, city, country, specialization, address, phone, website, email, status, outreach_status, discovery_date FROM clinics"
+                    conditions = []
+                    params = []
+                    
+                    if city:
+                        conditions.append("LOWER(city) = %s")
+                        params.append(city)
+                    if spec:
+                        conditions.append("LOWER(specialization) = %s")
+                        params.append(spec)
+                    if status_filter in ['Verified', 'Unverified']:
+                        conditions.append("status = %s")
+                        params.append(status_filter)
+                        
+                    if conditions:
+                        query += " WHERE " + " AND ".join(conditions)
+                        
+                    query += " ORDER BY discovery_date DESC LIMIT 100"
+                    
+                    cur.execute(query, params)
+                    db_rows = cur.fetchall()
+                    cur.close()
+                    conn.close()
+                    
+                    data.extend([dict(row) for row in db_rows])
+                    log(f"Fetched {len(db_rows)} clinics from Supabase", "OK")
             except Exception as e:
-                log(f"Error querying MongoDB: {str(e)}", "ERROR")
+                log(f"Error querying Supabase: {str(e)}", "ERROR")
         
-        # Add live_db entries not in MongoDB
+        # Add live_db entries not in Supabase/database
         if live_db:
             existing_names = {c['name'] for c in data}
             for live_clinic in live_db:
@@ -827,10 +965,19 @@ def clear_all_clinics():
     """Clear all clinics from database and memory file."""
     global live_db
     try:
-        # Clear MongoDB collection
-        if clinics_collection is not None:
-            clinics_collection.delete_many({})
-            log("✓ Cleared all clinics from MongoDB", "OK")
+        # Clear Supabase table
+        if postgres_connected:
+            try:
+                conn = get_db_connection()
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute("DELETE FROM clinics;")
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                    log("✓ Cleared all clinics from Supabase", "OK")
+            except Exception as e:
+                log(f"Error clearing Supabase clinics: {str(e)}", "ERROR")
             
         # Clear memory db
         live_db = []
@@ -860,17 +1007,32 @@ def get_stats():
             "pending": 0
         }
         
-        # Get from MongoDB
-        if clinics_collection is not None:
+        # Get from Supabase
+        if postgres_connected:
             try:
-                stats["total"] = clinics_collection.count_documents({})
-                stats["verified"] = clinics_collection.count_documents({"status": "Verified"})
-                stats["unverified"] = clinics_collection.count_documents({"status": "Unverified"})
-                stats["contacted"] = clinics_collection.count_documents({"outreach_status": "Contacted"})
-                stats["pending"] = clinics_collection.count_documents({"outreach_status": "Pending"})
-                log(f"Stats retrieved from MongoDB: {stats}", "OK")
+                conn = get_db_connection()
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute("SELECT COUNT(*) FROM clinics;")
+                    stats["total"] = cur.fetchone()[0]
+                    
+                    cur.execute("SELECT COUNT(*) FROM clinics WHERE status = 'Verified';")
+                    stats["verified"] = cur.fetchone()[0]
+                    
+                    cur.execute("SELECT COUNT(*) FROM clinics WHERE status = 'Unverified';")
+                    stats["unverified"] = cur.fetchone()[0]
+                    
+                    cur.execute("SELECT COUNT(*) FROM clinics WHERE outreach_status = 'Contacted';")
+                    stats["contacted"] = cur.fetchone()[0]
+                    
+                    cur.execute("SELECT COUNT(*) FROM clinics WHERE outreach_status = 'Pending';")
+                    stats["pending"] = cur.fetchone()[0]
+                    
+                    cur.close()
+                    conn.close()
+                    log(f"Stats retrieved from Supabase: {stats}", "OK")
             except Exception as e:
-                log(f"Error getting MongoDB stats: {str(e)}", "ERROR")
+                log(f"Error getting Supabase stats: {str(e)}", "ERROR")
         
         # Add live_db stats if no MongoDB data
         if stats["total"] == 0 and live_db:
@@ -912,20 +1074,38 @@ def trigger_outreach():
         for clinic_name in clinic_ids:
             try:
                 clinic = None
-                if clinics_collection:
-                    clinic = clinics_collection.find_one({"name": clinic_name})
-                else:
+                if postgres_connected:
+                    try:
+                        conn = get_db_connection()
+                        if conn:
+                            cur = conn.cursor(cursor_factory=RealDictCursor)
+                            cur.execute("SELECT name, city, country, specialization, address, phone, website, email, status, outreach_status, discovery_date FROM clinics WHERE name = %s;", (clinic_name,))
+                            row = cur.fetchone()
+                            cur.close()
+                            conn.close()
+                            if row:
+                                clinic = dict(row)
+                    except Exception as e:
+                        log(f"Failed to query clinic from Supabase: {e}", "WARNING")
+                
+                if not clinic:
                     clinic = next((c for c in live_db if c['name'] == clinic_name), None)
                 
                 if clinic and clinic.get('email'):
                     success, err_msg = auto_send(clinic, template)
                     if success:
                         contacted += 1
-                        if clinics_collection:
-                            clinics_collection.update_one(
-                                {"name": clinic_name},
-                                {"$set": {"outreach_status": "Contacted"}}
-                            )
+                        if postgres_connected:
+                            try:
+                                conn = get_db_connection()
+                                if conn:
+                                    cur = conn.cursor()
+                                    cur.execute("UPDATE clinics SET outreach_status = 'Contacted' WHERE name = %s;", (clinic_name,))
+                                    conn.commit()
+                                    cur.close()
+                                    conn.close()
+                            except Exception as e:
+                                log(f"Failed to update outreach_status in Supabase: {e}", "WARNING")
                         # Also update memory live_db state for real-time tracking
                         for c in live_db:
                             if c['name'] == clinic_name:
@@ -1063,10 +1243,10 @@ def health_check():
     global live_db
     live_db = load_data(verbose=False)
     try:
-        db_status = "Connected" if clinics_collection is not None else "Disconnected"
+        db_status = "Connected" if postgres_connected else "Disconnected"
         return jsonify({
             "status": "healthy",
-            "database": db_status,
+            "database": f"Supabase ({db_status})",
             "clinics_count": len(live_db),
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
         }), 200
@@ -1105,7 +1285,7 @@ if __name__ == '__main__':
     log("=" * 60, "OK")
     log("CLINIC DISCOVERY BACKEND - STARTING UP", "OK")
     log("=" * 60, "OK")
-    log(f"MongoDB: {MONGO_URI}", "INFO")
+    log(f"Supabase Connection Url: {'Configured' if DATABASE_URL else 'Not Configured'}", "INFO")
     log(f"Environment: {os.getenv('ENVIRONMENT', 'development')}", "INFO")
     log(f"Clinics loaded from disk: {len(live_db)}", "INFO")
     log("=" * 60, "OK")
