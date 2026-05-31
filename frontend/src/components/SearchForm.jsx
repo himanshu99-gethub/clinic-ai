@@ -1,110 +1,105 @@
 import React, { useState } from 'react';
+import { Search, MapPin, Globe, ToggleLeft, ToggleRight, Sparkles } from 'lucide-react';
 
 const SearchForm = ({ onSearch, isLoading }) => {
   const [query, setQuery] = useState({ city: '', country: '', specialization: '', auto_outreach: false });
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!query.specialization || !query.city) {
+      alert("Please fill out both Specialization and Target City fields!");
+      return;
+    }
     onSearch(query);
   };
 
-  const inputStyle = {
-    width: '100%', padding: '16px 20px 16px 48px',
-    background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)',
-    borderRadius: '12px', color: '#fff', fontSize: '14px', fontWeight: 500,
-    outline: 'none', transition: 'all 0.3s', fontFamily: 'inherit'
-  };
-
-  const labelStyle = {
-    display: 'block', fontSize: '10px', fontWeight: 800,
-    color: '#2E77AE', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '10px'
-  };
-
   const fields = [
-    { key: 'specialization', label: 'Clinical Specialization', placeholder: 'e.g. Dental Clinic', icon: '🩺' },
-    { key: 'city', label: 'Target City', placeholder: 'e.g. New York', icon: '🏙️' },
-    { key: 'country', label: 'Country / Region', placeholder: 'e.g. USA', icon: '🌍' },
+    { key: 'specialization', label: 'Clinical Specialization', placeholder: 'e.g. Dental Clinic', icon: <Sparkles size={18} className="text-[#2E77AE]/60" /> },
+    { key: 'city', label: 'Target City', placeholder: 'e.g. New York', icon: <MapPin size={18} className="text-[#2E77AE]/60" /> },
+    { key: 'country', label: 'Country / Region', placeholder: 'e.g. USA', icon: <Globe size={18} className="text-[#2E77AE]/60" /> },
   ];
 
   return (
-    <div className="glass-panel" style={{
-      padding: '40px', marginBottom: '40px', position: 'relative', overflow: 'hidden'
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '40px' }}>
-        <div>
-          <h2 style={{ fontSize: '24px', fontWeight: 900, color: '#fff', letterSpacing: '-1px' }}>
-            Discovery Unit
-          </h2>
-          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginTop: '4px' }}>
-            Initialize healthcare node scanning protocol
-          </p>
-        </div>
+    <div className="glass-panel p-8 md:p-10 mb-10 relative overflow-hidden border border-[#2E77AE]/15">
+      {/* Header */}
+      <div className="mb-8">
+        <h2 className="text-xl md:text-2xl font-black text-white tracking-tight uppercase">
+          Discovery Unit
+        </h2>
+        <p className="text-xs text-white/30 font-semibold mt-1 tracking-wider uppercase">
+          Initialize healthcare node scanning protocol
+        </p>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '28px' }}>
-        {fields.map(({ key, label, placeholder, icon }) => (
-          <div key={key}>
-            <label style={labelStyle}>{label}</label>
-            <div style={{ position: 'relative' }}>
-              <span style={{ position: 'absolute', left: '18px', top: '50%', transform: 'translateY(-50%)', fontSize: '18px', opacity: 0.5 }}>{icon}</span>
-              <input
-                type="text"
-                placeholder={placeholder}
-                style={inputStyle}
-                value={query[key]}
-                onChange={e => setQuery({ ...query, [key]: e.target.value })}
-                onFocus={e => { e.target.style.borderColor = '#2E77AE'; e.target.style.boxShadow = '0 0 15px rgba(46,119,174,0.2)'; }}
-                onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.08)'; e.target.style.boxShadow = 'none'; }}
-              />
+      <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+        {/* Fields Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {fields.map(({ key, label, placeholder, icon }) => (
+            <div key={key} className="flex flex-col gap-2">
+              <label className="text-[10px] font-black text-[#2E77AE] tracking-widest uppercase">
+                {label}
+              </label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center">
+                  {icon}
+                </span>
+                <input
+                  type="text"
+                  placeholder={placeholder}
+                  className="w-full pl-12 pr-4 py-4 bg-black/30 border border-white/8 rounded-xl text-white text-sm font-medium outline-none transition-all duration-300 focus:border-[#2E77AE] focus:shadow-[0_0_15px_rgba(46,119,174,0.2)] placeholder-white/10"
+                  value={query[key]}
+                  onChange={e => setQuery({ ...query, [key]: e.target.value })}
+                />
+              </div>
             </div>
-          </div>
-        ))}
-
-        <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '24px', background: 'rgba(0,0,0,0.2)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <div style={{ fontSize: '28px' }}>🤖</div>
-            <div>
-              <p style={{ color: '#fff', fontSize: '14px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>Automated Agent Protocol</p>
-              <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', fontWeight: 600, marginTop: '2px' }}>Agent will execute outreach sequence upon node verification</p>
-            </div>
-          </div>
-          <label style={{ position: 'relative', display: 'inline-block', width: '56px', height: '28px', cursor: 'pointer' }}>
-            <input 
-              type="checkbox" 
-              style={{ opacity: 0, width: 0, height: 0 }}
-              checked={query.auto_outreach}
-              onChange={e => setQuery({ ...query, auto_outreach: e.target.checked })}
-            />
-            <span style={{
-              position: 'absolute', cursor: 'pointer', inset: 0,
-              backgroundColor: query.auto_outreach ? '#2E77AE' : 'rgba(255,255,255,0.1)',
-              transition: '.4s', borderRadius: '34px',
-              boxShadow: query.auto_outreach ? '0 0 15px rgba(46,119,174,0.4)' : 'none'
-            }}>
-              <span style={{
-                position: 'absolute', content: '""', height: '20px', width: '20px',
-                left: query.auto_outreach ? '32px' : '4px', bottom: '4px',
-                backgroundColor: 'white', transition: '.4s', borderRadius: '50%'
-              }} />
-            </span>
-          </label>
+          ))}
         </div>
 
-        <div style={{ gridColumn: '1 / -1' }}>
+        {/* Automated Toggle Panel (Fully Responsive) */}
+        <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center p-5 bg-black/20 rounded-2xl border border-white/5">
+          <div className="flex items-center gap-4">
+            <div className="text-2xl bg-[#2E77AE]/10 p-2.5 rounded-xl border border-[#2E77AE]/20">🤖</div>
+            <div>
+              <p className="text-xs font-black text-white tracking-wider uppercase">Automated Agent Protocol</p>
+              <p className="text-[10px] text-white/30 font-semibold mt-0.5 leading-normal">Agent will execute outreach sequence upon node verification</p>
+            </div>
+          </div>
+          
+          <button
+            type="button"
+            onClick={() => setQuery({ ...query, auto_outreach: !query.auto_outreach })}
+            className="flex items-center gap-2 cursor-pointer focus:outline-none w-full sm:w-auto justify-end sm:justify-start"
+          >
+            {query.auto_outreach ? (
+              <ToggleRight size={44} className="text-[#2E77AE] transition-all duration-300 drop-shadow-[0_0_8px_rgba(46,119,174,0.5)]" />
+            ) : (
+              <ToggleLeft size={44} className="text-white/20 hover:text-white/30 transition-all duration-300" />
+            )}
+          </button>
+        </div>
+
+        {/* Action Button */}
+        <div>
           <button
             type="submit"
             disabled={isLoading}
-            className="glow-btn"
-            style={{
-              width: '100%', padding: '18px',
-              background: isLoading ? 'rgba(46,119,174,0.5)' : '#2E77AE',
-              border: 'none', borderRadius: '12px', color: '#fff',
-              fontSize: '14px', fontWeight: 900, cursor: isLoading ? 'not-allowed' : 'pointer',
-              letterSpacing: '3px', transition: 'all 0.3s',
-              textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px'
-            }}
+            className={`w-full py-4.5 rounded-xl text-white text-xs font-black tracking-widest uppercase flex items-center justify-center gap-3 transition-all duration-300 glow-btn border border-white/5 cursor-pointer ${
+              isLoading 
+                ? 'bg-[#2E77AE]/50 cursor-not-allowed radar-sweep' 
+                : 'bg-gradient-to-r from-[#2E77AE] to-[#1d5c8a] hover:shadow-[0_0_20px_rgba(46,119,174,0.4)]'
+            }`}
           >
-            {isLoading ? '⏳ SCANNING GRID...' : '🚀 Launch Discovery'}
+            {isLoading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                <span>Scanning Grid...</span>
+              </>
+            ) : (
+              <>
+                <Search size={14} />
+                <span>Launch Discovery</span>
+              </>
+            )}
           </button>
         </div>
       </form>
