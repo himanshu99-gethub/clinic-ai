@@ -482,53 +482,25 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
         
         log(f"[SCRAPER_TASK_QUERY_SETUP] Setting up query variations", "INFO")
         
-        # ── GENERATE 30+ DIVERSE QUERIES to reliably hit 200 unique clinics ──
-        # Core keyword patterns
-        type_keywords = [
-            specialization,
-            f"{specialization} clinic",
-            f"{specialization} center",
-            f"{specialization} care",
-            f"{specialization} hospital",
-            f"{specialization} specialist",
-            f"private {specialization}",
-            f"best {specialization}",
-            f"top rated {specialization}",
+        # ── GENERATE 6 FOCUSED HIGH-QUALITY QUERIES ──
+        # Instead of 90+ queries which lead to duplicates and extreme slowness,
+        # we generate 6 high-yield queries.
+        base_queries = [
+            f"{specialization} in {city}",
+            f"{specialization} clinic in {city}",
+            f"{specialization} center in {city}",
+            f"best {specialization} in {city}",
+            f"top rated {specialization} in {city}",
+            f"{specialization} specialist in {city}",
         ]
         
-        # City-level variations
-        city_variations = [city]
-        
-        # Common major city zone keywords to generate more results
-        area_keywords = [
-            "", "north", "south", "east", "west", "central",
-            "downtown", "old town", "city centre", "suburbs",
-        ]
-        
-        # Build all query combinations
         query_variations = []
-        for kw in type_keywords:
-            for area in area_keywords:
-                if area:
-                    q = f"{kw} in {city} {area}"
-                else:
-                    q = f"{kw} in {city}"
-                if country:
-                    q = f"{q}, {country}"
+        for q in base_queries:
+            if country:
+                query_variations.append(f"{q}, {country}")
+            else:
                 query_variations.append(q)
-        
-        # Also add generic zip/district queries if country is provided
-        extra_patterns = [
-            f"{specialization} near me {city}",
-            f"walk-in {specialization} {city}",
-            f"24 hour {specialization} {city}",
-            f"{specialization} appointment {city}",
-            f"{specialization} booking {city}",
-        ]
-        if country:
-            extra_patterns = [f"{q}, {country}" for q in extra_patterns]
-        query_variations.extend(extra_patterns)
-
+                
         # Remove any duplicates in queries
         seen_qs = set()
         unique_queries = []

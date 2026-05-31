@@ -303,7 +303,7 @@ def method_homepage(website: str) -> tuple:
     """M1: Scan homepage HTML."""
     if not website:
         return '', ''
-    html = fetch(website, timeout=3)
+    html = fetch(website, timeout=2)
     if html:
         ranked = extract_from_html(html, website)
         if ranked:
@@ -332,7 +332,7 @@ def method_subpages(website: str, homepage_html: str) -> str:
 
     with ThreadPoolExecutor(max_workers=min(len(sub_urls), 4)) as executor:
         futures = {executor.submit(check_url, url): url for url in sub_urls}
-        for future in as_completed(futures, timeout=8):
+        for future in as_completed(futures, timeout=4):
             res = future.result()
             if res:
                 log(f"    [M2-SUB-PARALLEL] Found: {res}")
@@ -361,7 +361,7 @@ def method_deep_crawl(website: str, homepage_html: str) -> str:
 
     with ThreadPoolExecutor(max_workers=min(len(all_links), 5)) as executor:
         futures = {executor.submit(check_url, url): url for url in all_links}
-        for future in as_completed(futures, timeout=8):
+        for future in as_completed(futures, timeout=4):
             res = future.result()
             if res:
                 log(f"    [M3-DEEP-PARALLEL] Found: {res}")
@@ -380,7 +380,7 @@ def method_google(clinic_name: str, city: str, domain: str) -> str:
 
     for q in queries[:1]:
         url = f"https://www.google.com/search?q={urllib.parse.quote(q)}&num=5"
-        html = fetch(url, timeout=3)
+        html = fetch(url, timeout=1.5)
         if html:
             ranked = extract_from_html(html, domain)
             if ranked:
@@ -400,7 +400,7 @@ def method_bing(clinic_name: str, city: str, domain: str) -> str:
 
     for q in queries[:1]:
         url = f"https://www.bing.com/search?q={urllib.parse.quote(q)}&count=5"
-        html = fetch(url, timeout=3, headers=BING_HEADERS)
+        html = fetch(url, timeout=1.5, headers=BING_HEADERS)
         if html:
             ranked = extract_from_html(html, domain)
             if ranked:
@@ -415,7 +415,7 @@ def method_duckduckgo(clinic_name: str, city: str, domain: str) -> str:
         return ''
     q = f'site:{domain} email contact'
     url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q)}"
-    html = fetch(url, timeout=3)
+    html = fetch(url, timeout=1.5)
     if html:
         ranked = extract_from_html(html, domain)
         if ranked:
@@ -479,7 +479,7 @@ def search_website_on_google(clinic_name: str, city: str) -> str:
     
     try:
         url = f"https://www.google.com/search?q={urllib.parse.quote(q)}&num=3"
-        html = fetch(url, timeout=3)
+        html = fetch(url, timeout=1.5)
         if html:
             soup = BeautifulSoup(html, 'html.parser')
             for a in soup.find_all('a', href=True):
