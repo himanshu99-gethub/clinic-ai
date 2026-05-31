@@ -111,15 +111,14 @@ class ClinicScraper:
             links = self.driver.find_elements(By.CLASS_NAME, "hfpxzc")
             log(f"Found {len(links)} clinic links on initial load")
             
-            # Scroll to load more results
-            for scroll_count in range(60):
+            # Scroll to load more results — cap at 15 iterations, 0.8s sleep
+            for scroll_count in range(15):
                 try:
-                    # Scroll down to load more results
                     self.driver.execute_script("""
                         var results_div = document.querySelector('div[role="feed"]') || document.querySelector('[role="main"]') || document.body;
-                        results_div.scrollTop += 2000;
+                        results_div.scrollTop += 3000;
                     """)
-                    time.sleep(2)
+                    time.sleep(0.8)
                     new_links = self.driver.find_elements(By.CLASS_NAME, "hfpxzc")
                     log(f"After scroll {scroll_count + 1}: Found {len(new_links)} total links")
                     if len(new_links) == len(links):
@@ -368,7 +367,7 @@ class ClinicScraper:
             try:
                 response = requests.head(
                     website_url,
-                    timeout=8,
+                    timeout=4,
                     allow_redirects=True,
                     headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
                     verify=False
@@ -380,7 +379,7 @@ class ClinicScraper:
                 # Fallback to GET request
                 response = requests.get(
                     website_url,
-                    timeout=8,
+                    timeout=4,
                     headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
                     verify=False
                 )
@@ -555,7 +554,7 @@ class ClinicScraper:
         # ── STEP 1: Homepage ──────────────────────────────────────────────
         homepage_html = ""
         try:
-            resp = requests.get(website_url, timeout=12, headers=headers,
+            resp = requests.get(website_url, timeout=5, headers=headers,
                                 verify=False, allow_redirects=True)
             homepage_html = resp.text
             log(f"[STEP1] Fetched homepage ({len(homepage_html)} bytes)", "INFO")
@@ -642,7 +641,7 @@ class ClinicScraper:
             for pattern in self.contact_page_patterns:
                 contact_links.add(f"{base_origin}{pattern}")
 
-            contact_links = list(contact_links)[:12]  # try up to 12 pages
+            contact_links = list(contact_links)[:6]  # try up to 6 pages (was 12)
             log(f"[STEP2] Scanning {len(contact_links)} sub-pages for {homepage_url}")
 
             request_headers = {
@@ -651,20 +650,27 @@ class ClinicScraper:
                               'Chrome/124.0.0.0 Safari/537.36'
             }
 
-            for url in contact_links:
+            # Fetch all sub-pages IN PARALLEL instead of sequentially
+            def _fetch_sub(url):
                 try:
                     if url.rstrip('/') == homepage_url.rstrip('/'):
-                        continue
-                    resp = requests.get(url, timeout=8,
-                                        headers=request_headers, verify=False)
-                    if resp.status_code == 200:
-                        ranked = self._extract_emails_from_html(resp.text, homepage_url)
+                        return None
+                    r = requests.get(url, timeout=3, headers=request_headers, verify=False)
+                    if r.status_code == 200:
+                        ranked = self._extract_emails_from_html(r.text, homepage_url)
                         if ranked:
-                            log(f"[STEP2_HIT] Found '{ranked[0]}' on {url}", "OK")
                             return ranked[0]
-                except Exception as sub_err:
-                    log(f"[STEP2_SUB_ERR] {url}: {sub_err}", "WARNING")
-                    continue
+                except Exception:
+                    pass
+                return None
+
+            with ThreadPoolExecutor(max_workers=min(len(contact_links), 6)) as ex:
+                futures = {ex.submit(_fetch_sub, url): url for url in contact_links}
+                for future in as_completed(futures, timeout=10):
+                    result = future.result()
+                    if result:
+                        log(f"[STEP2_HIT] Found '{result}' on {futures[future]}", "OK")
+                        return result
 
         except Exception as e:
             log(f"[STEP2_ERR] _extract_from_contact_pages: {e}", "WARNING")
@@ -672,18 +678,16 @@ class ClinicScraper:
         return ""
 
     def search_email_on_google(self, clinic_name, city, domain=None):
-        """Google search fallback — tries 3 query patterns, uses strict email filter."""
+        """Google search fallback — 1-2 queries max, requests only (no Selenium)."""
         log(f"[GOOGLE_SEARCH] clinic={clinic_name}, city={city}, domain={domain}")
 
-        # Build multiple query strategies for better coverage
+        # Use 1 query if domain known, otherwise 1 name-based query
         queries = []
         if domain:
-            queries.append(f'site:{domain} email')
-            queries.append(f'site:{domain} contact')
-        if clinic_name:
+            queries.append(f'site:{domain} email contact')
+        elif clinic_name:
             clean_name = clinic_name.replace('"', '')
             queries.append(f'"{clean_name}" {city} email')
-            queries.append(f'"{clean_name}" contact email')
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -695,35 +699,14 @@ class ClinicScraper:
         for query in queries:
             try:
                 search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&num=5"
-
-                # Try requests first (fast)
-                try:
-                    resp = requests.get(search_url, headers=headers, timeout=8)
-                    if resp.status_code == 200:
-                        ranked = self._extract_emails_from_html(resp.text, domain)
-                        if ranked:
-                            log(f"[GOOGLE_HIT_REQUESTS] '{ranked[0]}' via query: {query}", "OK")
-                            return ranked[0]
-                except Exception:
-                    pass
-
-                # Try Selenium if requests returned nothing (handles JS pages)
-                if self.driver:
-                    try:
-                        self.driver.get(search_url)
-                        time.sleep(2)
-                        ranked = self._extract_emails_from_html(
-                            self.driver.page_source, domain
-                        )
-                        if ranked:
-                            log(f"[GOOGLE_HIT_SELENIUM] '{ranked[0]}' via query: {query}", "OK")
-                            return ranked[0]
-                    except Exception:
-                        pass
-
+                resp = requests.get(search_url, headers=headers, timeout=4)
+                if resp.status_code == 200:
+                    ranked = self._extract_emails_from_html(resp.text, domain)
+                    if ranked:
+                        log(f"[GOOGLE_HIT] '{ranked[0]}' via: {query}", "OK")
+                        return ranked[0]
             except Exception as e:
                 log(f"[GOOGLE_SEARCH_ERR] query='{query}': {e}", "WARNING")
-                continue
 
         log(f"[GOOGLE_SEARCH_MISS] No email found via Google for {clinic_name}", "INFO")
         return ""
