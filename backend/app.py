@@ -1112,9 +1112,11 @@ if __name__ == '__main__':
 
     try:
         from waitress import serve
-        log("Starting with Waitress WSGI server on port 8081...", "OK")
-        serve(app, host='0.0.0.0', port=8081, threads=8)
+        port = int(os.getenv('PORT', 8081))
+        log(f"Starting with Waitress WSGI server on port {port}...", "OK")
+        serve(app, host='0.0.0.0', port=port, threads=8)
     except ImportError:
-        log("Waitress not found, falling back to Flask dev server...", "WARNING")
-        app.run(host='0.0.0.0', port=8081, debug=False, threaded=True)
+        port = int(os.getenv('PORT', 8081))
+        log(f"Waitress not found, falling back to Flask dev server on port {port}...", "WARNING")
+        app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
 
