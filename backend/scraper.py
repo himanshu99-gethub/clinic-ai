@@ -111,19 +111,24 @@ class ClinicScraper:
             links = self.driver.find_elements(By.CLASS_NAME, "hfpxzc")
             log(f"Found {len(links)} clinic links on initial load")
             
-            # Scroll to load more results — cap at 15 iterations, 0.8s sleep
-            for scroll_count in range(15):
+            # Scroll to load more results — cap at 6 iterations for speed, 1.0s sleep
+            no_new_count = 0
+            for scroll_count in range(6):
                 try:
                     self.driver.execute_script("""
                         var results_div = document.querySelector('div[role="feed"]') || document.querySelector('[role="main"]') || document.body;
                         results_div.scrollTop += 3000;
                     """)
-                    time.sleep(0.8)
+                    time.sleep(1.0)
                     new_links = self.driver.find_elements(By.CLASS_NAME, "hfpxzc")
                     log(f"After scroll {scroll_count + 1}: Found {len(new_links)} total links")
                     if len(new_links) == len(links):
-                        log("No new results after scroll, stopping")
-                        break
+                        no_new_count += 1
+                        if no_new_count >= 2:
+                            log("No new results after 2 scrolls, stopping")
+                            break
+                    else:
+                        no_new_count = 0
                     links = new_links
                 except Exception as e:
                     log(f"Error during scroll: {str(e)}", "WARNING")
@@ -162,7 +167,7 @@ class ClinicScraper:
                         except Exception:
                             self.driver.execute_script("arguments[0].click();", link)
                         
-                        # Wait for details panel — up to 4.0s max, exit early, poll every 0.15s
+                        # Wait for details panel — up to 2.0s max, exit early, poll every 0.1s
                         start_time = time.time()
                         panel_loaded = False
                         click_retried = False
@@ -183,9 +188,9 @@ class ClinicScraper:
                             overlap = set(n1_filtered).intersection(set(n2_filtered))
                             return len(overlap) > 0
 
-                        while time.time() - start_time < 4.0:
-                            # Retry JS click if 1.5 seconds pass without panel loaded
-                            if not click_retried and (time.time() - start_time > 1.5):
+                        while time.time() - start_time < 2.0:
+                            # Retry JS click if 0.7 seconds pass without panel loaded
+                            if not click_retried and (time.time() - start_time > 0.7):
                                 try:
                                     self.driver.execute_script("arguments[0].click();", link)
                                     click_retried = True
@@ -209,7 +214,7 @@ class ClinicScraper:
                                     break
                             except:
                                 pass
-                            time.sleep(0.15)
+                            time.sleep(0.1)
                                 
                     except Exception as click_err:
                         log(f"Error clicking clinic link: {str(click_err)}", "WARNING")

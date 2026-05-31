@@ -220,7 +220,7 @@ def add_log(msg, content=None):
     if len(activity_logs) > 100:
         activity_logs.pop(0)
 
-def is_duplicate_clinic(clinic_data, exclude_name=None):
+def is_duplicate_clinic(clinic_data, exclude_name=None, check_supabase=True):
     """
     Check if a clinic is a duplicate in database or memory.
     A clinic is a duplicate if name, website, phone, or email is already present.
@@ -274,7 +274,7 @@ def is_duplicate_clinic(clinic_data, exclude_name=None):
                 return True
                 
     # Check Supabase
-    if supabase_connected:
+    if check_supabase and supabase_connected:
         try:
             or_parts = [f"name.ilike.{name}"]
             if phone:
@@ -627,8 +627,8 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                     "discovery_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 }
                 
-                # Check for duplicates using new strict checks
-                if not is_duplicate_clinic(clinic_data):
+                # Check for duplicates using new strict checks (skip Supabase on the main Selenium thread)
+                if not is_duplicate_clinic(clinic_data, check_supabase=False):
                     live_db.append(clinic_data)
                     save_data()  # Persist to disk immediately
                     add_log(f"✨ Found clinic #{len(results)}: {clinic_data['name']}")
