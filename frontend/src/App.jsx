@@ -218,6 +218,21 @@ ClinicFlow AI | Lead Developer`;
 
   const [globalTemplate, setGlobalTemplate] = useState(getSavedTemplate());
 
+  // Fetch template from backend on mount
+  useEffect(() => {
+    const fetchTemplate = async () => {
+      try {
+        const res = await axios.get(`${API_BASE_URL}/template`);
+        if (res.data && res.data.template) {
+          setGlobalTemplate(res.data.template);
+        }
+      } catch (e) {
+        console.error('Failed to fetch template from backend:', e);
+      }
+    };
+    fetchTemplate();
+  }, []);
+
   const fetchData = async (filter) => {
     try {
       const params = filter || {};
@@ -292,11 +307,19 @@ ClinicFlow AI | Lead Developer`;
     setSelectedClinic(clinic);
   };
 
-  const handleSaveTemplate = (val) => {
-    setGlobalTemplate(val);
-    localStorage.setItem('outreach_template', val);
-    setMessage('✅ GLOBAL OUTREACH PROTOCOL SAVED SUCCESSFULLY');
-    setTimeout(() => setMessage(''), 5000);
+  const handleSaveTemplate = async (val) => {
+    try {
+      setGlobalTemplate(val);
+      localStorage.setItem('outreach_template', val);
+      
+      const res = await axios.post(`${API_BASE_URL}/template`, { template: val });
+      setMessage(res.data.message || '✅ GLOBAL OUTREACH PROTOCOL SAVED SUCCESSFULLY');
+    } catch (e) {
+      console.error('Failed to save template to backend:', e);
+      setMessage('❌ FAILED TO SAVE PROTOCOL TO DATABASE: ' + (e.response?.data?.error || e.message));
+    } finally {
+      setTimeout(() => setMessage(''), 5000);
+    }
   };
 
   const handleStopOutreach = () => {

@@ -45,12 +45,14 @@ def log(msg, level="INFO"):
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 clinics_collection = None
+settings_collection = None
 client = None
 
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     db = client["clinic_discovery"]
     clinics_collection = db["clinics"]
+    settings_collection = db["settings"]
     
     # Verify connection
     client.server_info()
@@ -66,6 +68,7 @@ except Exception as e:
     error_msg = f"MongoDB Connection Failed: {str(e)}\n{traceback.format_exc()}"
     log(error_msg, "ERROR")
     clinics_collection = None
+    settings_collection = None
 
 # ────────────────────────────────────────────────────────────
 # PERSISTENT FILE STORAGE (survives restarts)
@@ -74,6 +77,85 @@ except Exception as e:
 import json
 
 DATA_FILE = os.path.join(os.path.dirname(__file__), 'clinics_data.json')
+SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'settings_data.json')
+
+DEFAULT_TEMPLATE = (
+    "Subject: Strategic Partnership Inquiry | [Clinic Name]\n\n"
+    "Dear Administrative Team,\n\n"
+    "I hope this message finds you well. I am reaching out from ClinicFlow AI on behalf of our healthcare outreach division.\n\n"
+    "We've been closely analyzing clinical excellence in your region, and [Clinic Name] stands out as a leader in patient care and medical innovation.\n\n"
+    "We would love to explore how ClinicFlow AI can help streamline your patient acquisition and operational efficiency.\n\n"
+    "Would you be available for a brief 15-minute call this week?\n\n"
+    "Best regards,\n"
+    "Himanshu Shakya\n"
+    "ClinicFlow AI | Lead Developer"
+)
+
+def load_template(verbose=True):
+    """Load the email template from MongoDB or local JSON fallback."""
+    # 1. Try MongoDB
+    if settings_collection is not None:
+        try:
+            doc = settings_collection.find_one({"key": "outreach_template"})
+            if doc and "value" in doc:
+                if verbose:
+                    log("Loaded email template from MongoDB settings", "OK")
+                return doc["value"]
+        except Exception as e:
+            if verbose:
+                log(f"Could not load template from MongoDB: {e}", "WARNING")
+                
+    # 2. Try JSON file fallback
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+                if "outreach_template" in settings:
+                    if verbose:
+                        log("Loaded email template from file storage", "OK")
+                    return settings["outreach_template"]
+    except Exception as e:
+        if verbose:
+            log(f"Could not load settings file: {e}", "WARNING")
+            
+    # 3. Default fallback
+    if verbose:
+        log("Using default fallback email template", "INFO")
+    return DEFAULT_TEMPLATE
+
+def save_template(template_content):
+    """Save the email template to MongoDB and local JSON fallback."""
+    # 1. Try MongoDB
+    mongo_success = False
+    if settings_collection is not None:
+        try:
+            settings_collection.replace_one(
+                {"key": "outreach_template"},
+                {"key": "outreach_template", "value": template_content},
+                upsert=True
+            )
+            log("Saved email template to MongoDB successfully", "OK")
+            mongo_success = True
+        except Exception as e:
+            log(f"Could not save template to MongoDB: {e}", "WARNING")
+            
+    # 2. Try JSON file
+    try:
+        settings = {}
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                try:
+                    settings = json.load(f)
+                except Exception:
+                    pass
+        settings["outreach_template"] = template_content
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+        log("Saved email template to file storage successfully", "OK")
+        return True
+    except Exception as e:
+        log(f"Could not save settings file: {e}", "WARNING")
+        return mongo_success
 
 def load_data(verbose=True):
     """Load clinics from JSON file."""
@@ -951,6 +1033,37 @@ def generate_protocol():
         
     except Exception as e:
         log(f"Generate protocol endpoint error: {str(e)}", "ERROR")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/api/template', methods=['GET'])
+def get_template():
+    """Retrieve the global email template."""
+    try:
+        template = load_template()
+        return jsonify({"template": template}), 200
+    except Exception as e:
+        log(f"Get template endpoint error: {str(e)}", "ERROR")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/api/template', methods=['POST'])
+def update_template():
+    """Update the global email template."""
+    try:
+        data = request.json or {}
+        template = data.get('template', '').strip()
+        if not template:
+            return jsonify({"error": "Template is required"}), 400
+            
+        success = save_template(template)
+        if success:
+            return jsonify({
+                "message": "Global outreach template saved successfully",
+                "template": template
+            }), 200
+        else:
+            return jsonify({"error": "Failed to save template"}), 500
+    except Exception as e:
+        log(f"Update template endpoint error: {str(e)}", "ERROR")
         return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/api/health', methods=['GET'])
