@@ -1,0 +1,23 @@
+# Python cache files
+__pycache__/
+*.pyc
+**/*.pyc
+**/__pycache__/
+
+# Environments
+.env
+.env.local
+.env.*
+venv/
+.venv/
+backend/venv/
+backend/.env
+
+# Local logs
+*.log
+**/server.log
+**/server_utf8.log
+
+# Local data files (if they are for local database fallback only)
+# clinics_data.json
+# settings_data.json

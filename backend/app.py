@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-import psycopg2
-from psycopg2.extras import RealDictCursor
+# No psycopg2 needed, using requests for Supabase REST API
 import os
 import time
 import threading
@@ -41,72 +40,76 @@ def log(msg, level="INFO"):
     sys.stdout.flush()  # Explicit flush for daemon threads
 
 # ────────────────────────────────────────────────────────────
-# SUPABASE / POSTGRESQL CONFIGURATION
+# SUPABASE REST API CONFIGURATION
 # ────────────────────────────────────────────────────────────
 
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
-postgres_connected = False
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase_connected = False
 
-def get_db_connection():
-    """Establish a connection to Supabase/Postgres."""
-    if not DATABASE_URL:
-        return None
-    try:
-        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-        return conn
-    except Exception as e:
-        log(f"Supabase connection failed: {e}", "ERROR")
-        return None
-
-# Self-initialize database tables
-if DATABASE_URL:
-    try:
-        conn = get_db_connection()
-        if conn:
-            cur = conn.cursor()
-            
-            # Create settings table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS settings (
-                    key VARCHAR(255) PRIMARY KEY,
-                    value TEXT
-                );
-            """)
-            
-            # Create clinics table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS clinics (
-                    id SERIAL PRIMARY KEY,
-                    name VARCHAR(255) NOT NULL,
-                    city VARCHAR(100) NOT NULL,
-                    country VARCHAR(100),
-                    specialization VARCHAR(100),
-                    address TEXT,
-                    phone VARCHAR(100),
-                    website TEXT,
-                    email VARCHAR(255),
-                    status VARCHAR(50),
-                    outreach_status VARCHAR(50),
-                    discovery_date VARCHAR(50),
-                    UNIQUE (name, city)
-                );
-            """)
-            
-            # Create indexes
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_clinics_specialization ON clinics(specialization);")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_clinics_discovery ON clinics(discovery_date DESC);")
-            
-            conn.commit()
-            cur.close()
-            conn.close()
-            log("✓ Connected to Supabase (Postgres) successfully", "OK")
-            postgres_connected = True
-        else:
-            log("Supabase connection failed: get_db_connection returned None", "ERROR")
-    except Exception as e:
-        log(f"Failed to initialize Supabase tables: {e}\n{traceback.format_exc()}", "ERROR")
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase_connected = True
+    log(f"✓ Supabase REST API configured for URL: {SUPABASE_URL}", "OK")
 else:
-    log("DATABASE_URL or SUPABASE_DB_URL is not set in environment. Running on file storage fallback only.", "WARNING")
+    log("Supabase URL or Key not set. Running on local JSON file storage fallback.", "WARNING")
+
+def get_supabase_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+
+def supabase_get(table, params=None):
+    """Fetch rows from a Supabase table."""
+    if not supabase_connected:
+        return None
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/{table}"
+        response = requests.get(url, headers=get_supabase_headers(), params=params, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            log(f"Supabase GET {table} failed ({response.status_code}): {response.text}", "WARNING")
+            return None
+    except Exception as e:
+        log(f"Supabase GET error: {e}", "WARNING")
+        return None
+
+def supabase_upsert(table, data):
+    """Upsert rows into a Supabase table."""
+    if not supabase_connected:
+        return False
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/{table}"
+        headers = get_supabase_headers()
+        headers["Prefer"] = "resolution=merge-duplicates"
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        if response.status_code in [200, 201]:
+            return True
+        else:
+            log(f"Supabase POST {table} failed ({response.status_code}): {response.text}", "WARNING")
+            return False
+    except Exception as e:
+        log(f"Supabase POST error: {e}", "WARNING")
+        return False
+
+def supabase_delete(table, params):
+    """Delete rows from a Supabase table based on query parameters."""
+    if not supabase_connected:
+        return False
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/{table}"
+        response = requests.delete(url, headers=get_supabase_headers(), params=params, timeout=10)
+        if response.status_code in [200, 204]:
+            return True
+        else:
+            log(f"Supabase DELETE {table} failed ({response.status_code}): {response.text}", "WARNING")
+            return False
+    except Exception as e:
+        log(f"Supabase DELETE error: {e}", "WARNING")
+        return False
 
 # ────────────────────────────────────────────────────────────
 # PERSISTENT FILE STORAGE (survives restarts)
@@ -132,22 +135,12 @@ DEFAULT_TEMPLATE = (
 def load_template(verbose=True):
     """Load the email template from Supabase or local JSON fallback."""
     # 1. Try Supabase
-    if postgres_connected:
-        try:
-            conn = get_db_connection()
-            if conn:
-                cur = conn.cursor()
-                cur.execute("SELECT value FROM settings WHERE key = 'outreach_template';")
-                row = cur.fetchone()
-                cur.close()
-                conn.close()
-                if row:
-                    if verbose:
-                        log("Loaded email template from Supabase settings", "OK")
-                    return row[0]
-        except Exception as e:
+    if supabase_connected:
+        rows = supabase_get("settings", {"key": "eq.outreach_template"})
+        if rows and len(rows) > 0:
             if verbose:
-                log(f"Could not load template from Supabase: {e}", "WARNING")
+                log("Loaded email template from Supabase settings table", "OK")
+            return rows[0].get("value")
                 
     # 2. Try JSON file fallback
     try:
@@ -171,24 +164,10 @@ def save_template(template_content):
     """Save the email template to Supabase and local JSON fallback."""
     # 1. Try Supabase
     db_success = False
-    if postgres_connected:
-        try:
-            conn = get_db_connection()
-            if conn:
-                cur = conn.cursor()
-                cur.execute("""
-                    INSERT INTO settings (key, value) 
-                    VALUES ('outreach_template', %s)
-                    ON CONFLICT (key) 
-                    DO UPDATE SET value = EXCLUDED.value;
-                """, (template_content,))
-                conn.commit()
-                cur.close()
-                conn.close()
-                log("Saved email template to Supabase successfully", "OK")
-                db_success = True
-        except Exception as e:
-            log(f"Could not save template to Supabase: {e}", "WARNING")
+    if supabase_connected:
+        db_success = supabase_upsert("settings", [{"key": "outreach_template", "value": template_content}])
+        if db_success:
+            log("Saved email template to Supabase successfully", "OK")
             
     # 2. Try JSON file
     try:
@@ -304,39 +283,24 @@ def is_duplicate_clinic(clinic_data, exclude_name=None):
                 return True
                 
     # Check Supabase
-    if postgres_connected:
+    if supabase_connected:
         try:
-            conn = get_db_connection()
-            if conn:
-                cur = conn.cursor()
+            or_parts = [f"name.ilike.{name}"]
+            if phone:
+                or_parts.append(f"phone.eq.{phone}")
+            if web_clean:
+                or_parts.append(f"website.ilike.%{web_clean}%")
+            if email:
+                or_parts.append(f"email.ilike.{email}")
                 
-                # Build OR conditions
-                query = "SELECT name FROM clinics WHERE LOWER(name) = %s"
-                params = [name]
+            params = {"or": f"({','.join(or_parts)})"}
+            if exclude_name:
+                params["name"] = f"neq.{exclude_name}"
                 
-                if phone:
-                    query += " OR phone = %s"
-                    params.append(phone)
-                if website:
-                    query += " OR LOWER(website) LIKE %s"
-                    params.append(f"%{web_clean}%")
-                if email:
-                    query += " OR LOWER(email) = %s"
-                    params.append(email)
-                
-                # If excluding specific name
-                if exclude_name:
-                    query = f"SELECT name FROM ({query}) AS sub WHERE LOWER(name) != %s"
-                    params.append(exclude_name.lower())
-                    
-                cur.execute(query, params)
-                existing = cur.fetchone()
-                cur.close()
-                conn.close()
-                
-                if existing:
-                    log(f"Duplicate found in Supabase: {existing[0]}", "INFO")
-                    return True
+            rows = supabase_get("clinics", params)
+            if rows and len(rows) > 0:
+                log(f"Duplicate found in Supabase: {rows[0].get('name')}", "INFO")
+                return True
         except Exception as e:
             log(f"Supabase duplicate check failed: {e}", "WARNING")
             
@@ -512,19 +476,10 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
     save_data()
     log("Cleared previous clinics from memory and file storage.", "INFO")
     
-    if postgres_connected:
-        try:
-            conn = get_db_connection()
-            if conn:
-                cur = conn.cursor()
-                cur.execute("DELETE FROM clinics;")
-                conn.commit()
-                deleted_count = cur.rowcount
-                cur.close()
-                conn.close()
-                log(f"Cleared Supabase: deleted {deleted_count} previous clinics to start fresh search.", "INFO")
-        except Exception as e:
-            log(f"Failed to clear Supabase clinics for new search: {e}", "WARNING")
+    if supabase_connected:
+        success = supabase_delete("clinics", {"id": "gt.0"})
+        if success:
+            log("Cleared previous clinics from Supabase table.", "INFO")
 
     scraper = None
     try:
@@ -621,17 +576,8 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                     global live_db
                     live_db = [c for c in live_db if c["name"].lower() != name.lower()]
                     save_data()
-                    if postgres_connected:
-                        try:
-                            conn = get_db_connection()
-                            if conn:
-                                cur = conn.cursor()
-                                cur.execute("DELETE FROM clinics WHERE name = %s AND city = %s;", (name, city))
-                                conn.commit()
-                                cur.close()
-                                conn.close()
-                        except Exception as ex:
-                            log(f"Failed to delete clinic from Supabase: {ex}", "WARNING")
+                    if supabase_connected:
+                        supabase_delete("clinics", {"name": f"eq.{name}", "city": f"eq.{city}"})
                     return
 
                 log(f"[PROCESS_EXTRACT] Attempting email extraction for {name} with website: {website}", "INFO")
@@ -648,17 +594,8 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                         log(f"🗑️ REJECTED - Email '{email}' is already associated with another clinic.", "WARNING")
                         live_db = [c for c in live_db if c["name"].lower() != name.lower()]
                         save_data()
-                        if postgres_connected:
-                            try:
-                                conn = get_db_connection()
-                                if conn:
-                                    cur = conn.cursor()
-                                    cur.execute("DELETE FROM clinics WHERE name = %s AND city = %s;", (name, city))
-                                    conn.commit()
-                                    cur.close()
-                                    conn.close()
-                            except Exception as ex:
-                                log(f"Failed to delete clinic from Supabase: {ex}", "WARNING")
+                        if supabase_connected:
+                            supabase_delete("clinics", {"name": f"eq.{name}", "city": f"eq.{city}"})
                         add_log(f"🗑️ Removed duplicate clinic (matching email): {name}")
                         return
                     
@@ -679,45 +616,23 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                     log(f"[PROCESS_EMAIL_EMPTY] Email extraction returned empty", "WARNING")
                 
                 # Store or update in Supabase
-                if postgres_connected:
-                    try:
-                        conn = get_db_connection()
-                        if conn:
-                            cur = conn.cursor()
-                            cur.execute("""
-                                INSERT INTO clinics (
-                                    name, city, country, specialization, address, 
-                                    phone, website, email, status, outreach_status, discovery_date
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                ON CONFLICT (name, city) DO UPDATE SET
-                                    country = EXCLUDED.country,
-                                    specialization = EXCLUDED.specialization,
-                                    address = EXCLUDED.address,
-                                    phone = EXCLUDED.phone,
-                                    website = EXCLUDED.website,
-                                    email = EXCLUDED.email,
-                                    status = EXCLUDED.status,
-                                    outreach_status = EXCLUDED.outreach_status,
-                                    discovery_date = EXCLUDED.discovery_date;
-                            """, (
-                                clinic_ref.get("name"),
-                                clinic_ref.get("city"),
-                                clinic_ref.get("country"),
-                                clinic_ref.get("specialization"),
-                                clinic_ref.get("address"),
-                                clinic_ref.get("phone"),
-                                clinic_ref.get("website"),
-                                clinic_ref.get("email"),
-                                clinic_ref.get("status"),
-                                clinic_ref.get("outreach_status"),
-                                clinic_ref.get("discovery_date")
-                            ))
-                            conn.commit()
-                            cur.close()
-                            conn.close()
-                            log(f"[PROCESS_SUPABASE_SAVED] Saved to Supabase", "INFO")
-                    except Exception as e:
-                        log(f"[PROCESS_SUPABASE_ERROR] Supabase error: {e}", "WARNING")
+                if supabase_connected:
+                    clinic_payload = {
+                        "name": clinic_ref.get("name"),
+                        "city": clinic_ref.get("city"),
+                        "country": clinic_ref.get("country"),
+                        "specialization": clinic_ref.get("specialization"),
+                        "address": clinic_ref.get("address"),
+                        "phone": clinic_ref.get("phone"),
+                        "website": clinic_ref.get("website"),
+                        "email": clinic_ref.get("email"),
+                        "status": clinic_ref.get("status"),
+                        "outreach_status": clinic_ref.get("outreach_status"),
+                        "discovery_date": clinic_ref.get("discovery_date")
+                    }
+                    success = supabase_upsert("clinics", [clinic_payload])
+                    if success:
+                        log(f"[PROCESS_SUPABASE_SAVED] Saved to Supabase clinics table", "INFO")
                 
                 save_data()
                 log(f"[PROCESS_SAVED] Data persisted to JSON", "OK")
@@ -901,39 +816,22 @@ def get_clinics():
         data = []
         
         # Try to fetch from Supabase first
-        if postgres_connected:
-            try:
-                conn = get_db_connection()
-                if conn:
-                    cur = conn.cursor(cursor_factory=RealDictCursor)
-                    query = "SELECT name, city, country, specialization, address, phone, website, email, status, outreach_status, discovery_date FROM clinics"
-                    conditions = []
-                    params = []
-                    
-                    if city:
-                        conditions.append("LOWER(city) = %s")
-                        params.append(city)
-                    if spec:
-                        conditions.append("LOWER(specialization) = %s")
-                        params.append(spec)
-                    if status_filter in ['Verified', 'Unverified']:
-                        conditions.append("status = %s")
-                        params.append(status_filter)
-                        
-                    if conditions:
-                        query += " WHERE " + " AND ".join(conditions)
-                        
-                    query += " ORDER BY discovery_date DESC LIMIT 100"
-                    
-                    cur.execute(query, params)
-                    db_rows = cur.fetchall()
-                    cur.close()
-                    conn.close()
-                    
-                    data.extend([dict(row) for row in db_rows])
-                    log(f"Fetched {len(db_rows)} clinics from Supabase", "OK")
-            except Exception as e:
-                log(f"Error querying Supabase: {str(e)}", "ERROR")
+        if supabase_connected:
+            params = {}
+            if city:
+                params["city"] = f"ilike.{city}"
+            if spec:
+                params["specialization"] = f"ilike.{spec}"
+            if status_filter in ['Verified', 'Unverified']:
+                params["status"] = f"eq.{status_filter}"
+            
+            params["order"] = "discovery_date.desc"
+            params["limit"] = "100"
+            
+            db_rows = supabase_get("clinics", params)
+            if db_rows:
+                data.extend(db_rows)
+                log(f"Fetched {len(db_rows)} clinics from Supabase", "OK")
         
         # Add live_db entries not in Supabase/database
         if live_db:
@@ -966,18 +864,10 @@ def clear_all_clinics():
     global live_db
     try:
         # Clear Supabase table
-        if postgres_connected:
-            try:
-                conn = get_db_connection()
-                if conn:
-                    cur = conn.cursor()
-                    cur.execute("DELETE FROM clinics;")
-                    conn.commit()
-                    cur.close()
-                    conn.close()
-                    log("✓ Cleared all clinics from Supabase", "OK")
-            except Exception as e:
-                log(f"Error clearing Supabase clinics: {str(e)}", "ERROR")
+        if supabase_connected:
+            success = supabase_delete("clinics", {"id": "gt.0"})
+            if success:
+                log("✓ Cleared all clinics from Supabase", "OK")
             
         # Clear memory db
         live_db = []
@@ -1008,31 +898,15 @@ def get_stats():
         }
         
         # Get from Supabase
-        if postgres_connected:
-            try:
-                conn = get_db_connection()
-                if conn:
-                    cur = conn.cursor()
-                    cur.execute("SELECT COUNT(*) FROM clinics;")
-                    stats["total"] = cur.fetchone()[0]
-                    
-                    cur.execute("SELECT COUNT(*) FROM clinics WHERE status = 'Verified';")
-                    stats["verified"] = cur.fetchone()[0]
-                    
-                    cur.execute("SELECT COUNT(*) FROM clinics WHERE status = 'Unverified';")
-                    stats["unverified"] = cur.fetchone()[0]
-                    
-                    cur.execute("SELECT COUNT(*) FROM clinics WHERE outreach_status = 'Contacted';")
-                    stats["contacted"] = cur.fetchone()[0]
-                    
-                    cur.execute("SELECT COUNT(*) FROM clinics WHERE outreach_status = 'Pending';")
-                    stats["pending"] = cur.fetchone()[0]
-                    
-                    cur.close()
-                    conn.close()
-                    log(f"Stats retrieved from Supabase: {stats}", "OK")
-            except Exception as e:
-                log(f"Error getting Supabase stats: {str(e)}", "ERROR")
+        if supabase_connected:
+            rows = supabase_get("clinics")
+            if rows:
+                stats["total"] = len(rows)
+                stats["verified"] = len([r for r in rows if r.get("status") == "Verified"])
+                stats["unverified"] = len([r for r in rows if r.get("status") == "Unverified"])
+                stats["contacted"] = len([r for r in rows if r.get("outreach_status") == "Contacted"])
+                stats["pending"] = len([r for r in rows if r.get("outreach_status") == "Pending"])
+                log(f"Stats retrieved from Supabase: {stats}", "OK")
         
         # Add live_db stats if no MongoDB data
         if stats["total"] == 0 and live_db:
@@ -1074,19 +948,10 @@ def trigger_outreach():
         for clinic_name in clinic_ids:
             try:
                 clinic = None
-                if postgres_connected:
-                    try:
-                        conn = get_db_connection()
-                        if conn:
-                            cur = conn.cursor(cursor_factory=RealDictCursor)
-                            cur.execute("SELECT name, city, country, specialization, address, phone, website, email, status, outreach_status, discovery_date FROM clinics WHERE name = %s;", (clinic_name,))
-                            row = cur.fetchone()
-                            cur.close()
-                            conn.close()
-                            if row:
-                                clinic = dict(row)
-                    except Exception as e:
-                        log(f"Failed to query clinic from Supabase: {e}", "WARNING")
+                if supabase_connected:
+                    rows = supabase_get("clinics", {"name": f"eq.{clinic_name}"})
+                    if rows and len(rows) > 0:
+                        clinic = rows[0]
                 
                 if not clinic:
                     clinic = next((c for c in live_db if c['name'] == clinic_name), None)
@@ -1095,17 +960,8 @@ def trigger_outreach():
                     success, err_msg = auto_send(clinic, template)
                     if success:
                         contacted += 1
-                        if postgres_connected:
-                            try:
-                                conn = get_db_connection()
-                                if conn:
-                                    cur = conn.cursor()
-                                    cur.execute("UPDATE clinics SET outreach_status = 'Contacted' WHERE name = %s;", (clinic_name,))
-                                    conn.commit()
-                                    cur.close()
-                                    conn.close()
-                            except Exception as e:
-                                log(f"Failed to update outreach_status in Supabase: {e}", "WARNING")
+                        if supabase_connected:
+                            supabase_upsert("clinics", [{"name": clinic_name, "city": clinic.get("city"), "outreach_status": "Contacted"}])
                         # Also update memory live_db state for real-time tracking
                         for c in live_db:
                             if c['name'] == clinic_name:
@@ -1243,10 +1099,10 @@ def health_check():
     global live_db
     live_db = load_data(verbose=False)
     try:
-        db_status = "Connected" if postgres_connected else "Disconnected"
+        db_status = "Connected" if supabase_connected else "Disconnected"
         return jsonify({
             "status": "healthy",
-            "database": f"Supabase ({db_status})",
+            "database": f"Supabase REST ({db_status})",
             "clinics_count": len(live_db),
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
         }), 200
@@ -1285,7 +1141,7 @@ if __name__ == '__main__':
     log("=" * 60, "OK")
     log("CLINIC DISCOVERY BACKEND - STARTING UP", "OK")
     log("=" * 60, "OK")
-    log(f"Supabase Connection Url: {'Configured' if DATABASE_URL else 'Not Configured'}", "INFO")
+    log(f"Supabase Connection Url: {'Configured' if SUPABASE_URL else 'Not Configured'}", "INFO")
     log(f"Environment: {os.getenv('ENVIRONMENT', 'development')}", "INFO")
     log(f"Clinics loaded from disk: {len(live_db)}", "INFO")
     log("=" * 60, "OK")
