@@ -176,7 +176,7 @@ const TemplateEditor = ({ template, onSave }) => {
 // ── Main App ─────────────────────────────────────────────
 export default function App() {
   const [clinics, setClinics] = useState([]);
-  const [stats, setStats] = useState({ total: 0, verified: 0, unverified: 0 });
+  const [stats, setStats] = useState({ total: 0, verified: 0, unverified: 0, scraper_running: false });
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -496,7 +496,7 @@ export default function App() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: '40px', alignItems: 'start' }}>
                 <div style={{ minWidth: 0 }}>
-                  <SearchForm onSearch={handleSearch} isLoading={loading} />
+                  <SearchForm onSearch={handleSearch} isLoading={loading || stats.scraper_running} />
 
                   <div className="glass-panel" style={{
                     padding: '32px', border: '1px solid rgba(46,119,174,0.15)'

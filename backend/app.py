@@ -907,6 +907,7 @@ def get_stats():
             stats["contacted"] = len([c for c in live_db if c.get('outreach_status') == 'Contacted'])
             stats["pending"] = len([c for c in live_db if c.get('outreach_status') == 'Pending'])
         
+        stats["scraper_running"] = scraper_lock.locked()
         return jsonify(stats), 200
         
     except Exception as e:
