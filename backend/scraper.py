@@ -47,14 +47,15 @@ class ClinicScraper:
             # Prevent connection issues on limited Linux containers
             options.add_argument("--remote-debugging-port=9222")
             
+            # Eager page load strategy so Selenium doesn't wait for heavy map assets/tiles
+            options.page_load_strategy = 'eager'
+            
             # Check for Render custom Chrome binary path
             import os
             render_chrome_path = "/opt/render/project/.render/chrome/opt/google/chrome/google-chrome"
             if os.path.exists(render_chrome_path):
                 log(f"Render custom Chrome path detected: {render_chrome_path}", "INFO")
                 options.binary_location = render_chrome_path
-            
-            # No image blocking or eager page load strategy, as Google Maps requires them to render search panels
             
             self.driver = webdriver.Chrome(options=options)
             # Remove navigator.webdriver flag to bypass bot detection
@@ -65,7 +66,7 @@ class ClinicScraper:
                     })
                 """
             })
-            self.driver.set_page_load_timeout(60)
+            self.driver.set_page_load_timeout(25)
             log("WebDriver initialized successfully with window size 1920x1080")
         except Exception as e:
             error_msg = f"Failed to initialize WebDriver: {str(e)}\n{traceback.format_exc()}"
