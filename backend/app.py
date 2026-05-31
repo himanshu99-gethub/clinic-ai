@@ -441,26 +441,17 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
     log(f"[SCRAPER_TASK_START] Starting scraper task for {specialization} in {city}, {country}", "INFO")
     add_log(f"🚀 DISCOVERY INITIATED: {specialization} in {city}, {country or 'Global'}")
     
-    # ── SINGLE SPECIALIZATION ENFORCEMENT ──
-    spec_lower = specialization.strip().lower()
-    
-    # Filter live_db to keep only the current specialization
-    original_live_len = len(live_db)
-    live_db = [c for c in live_db if c.get("specialization", "").strip().lower() == spec_lower]
-    removed_live = original_live_len - len(live_db)
-    log(f"Enforced single specialization: removed {removed_live} non-matching clinics from memory.", "INFO")
+    # Clear all previous clinics to start completely fresh for the new search
+    live_db = []
     save_data()
+    log("Cleared previous clinics from memory and file storage.", "INFO")
     
-    # Filter MongoDB to keep only the current specialization
     if clinics_collection is not None:
         try:
-            import re
-            delete_res = clinics_collection.delete_many({
-                "specialization": {"$not": re.compile(f"^{re.escape(spec_lower)}$", re.IGNORECASE)}
-            })
-            log(f"Enforced single specialization in MongoDB: deleted {delete_res.deleted_count} non-matching clinics.", "INFO")
+            delete_res = clinics_collection.delete_many({})
+            log(f"Cleared MongoDB: deleted {delete_res.deleted_count} previous clinics to start fresh search.", "INFO")
         except Exception as e:
-            log(f"Failed to clear non-matching specializations in MongoDB: {e}", "WARNING")
+            log(f"Failed to clear MongoDB clinics for new search: {e}", "WARNING")
 
     scraper = None
     try:
