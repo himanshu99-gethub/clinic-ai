@@ -131,7 +131,9 @@ class ClinicScraper:
             
             # Extract clinic data from each result
             used_names = set()
-            for i in range(500):
+            # Cap at 30 clinics per query to avoid spending too long on one query
+            MAX_PER_QUERY = 30
+            for i in range(MAX_PER_QUERY):
                 try:
                     # Re-find links dynamically to prevent StaleElementReferenceException
                     links = self.driver.find_elements(By.CLASS_NAME, "hfpxzc")
@@ -148,47 +150,44 @@ class ClinicScraper:
                     
                     # Click on the clinic to view details
                     try:
-                        # Scroll element into view and wait briefly to ensure it is clickable in the viewport
+                        # Scroll element into view — minimal sleep
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link)
-                        time.sleep(0.5)
+                        time.sleep(0.15)
                         
                         try:
                             link.click()
                         except Exception:
                             self.driver.execute_script("arguments[0].click();", link)
                         
-                        # Wait dynamically for details panel to load the new clinic name
+                        # Wait for details panel — reduced to 1.5s max, poll every 0.15s
                         start_time = time.time()
                         panel_loaded = False
                         clean_name = re.sub(r'[^a-zA-Z0-9]', '', name).lower()
-                        while time.time() - start_time < 5.0:
+                        while time.time() - start_time < 1.5:
                             try:
                                 h1_els = self.driver.find_elements(By.TAG_NAME, "h1")
-                                h1_texts = [el.text for el in h1_els if el.text]
-                                for txt in h1_texts:
-                                    clean_txt = re.sub(r'[^a-zA-Z0-9]', '', txt).lower()
-                                    if clean_name in clean_txt or clean_txt in clean_name:
-                                        panel_loaded = True
-                                        break
+                                for el in h1_els:
+                                    txt = el.text
+                                    if txt:
+                                        clean_txt = re.sub(r'[^a-zA-Z0-9]', '', txt).lower()
+                                        if clean_name in clean_txt or clean_txt in clean_name:
+                                            panel_loaded = True
+                                            break
                                 if panel_loaded:
                                     break
                             except:
                                 pass
-                            time.sleep(0.2)
+                            time.sleep(0.15)
                             
-                        # Fallback: if H1 checks fail, check if any details panel element is present (e.g. phone or address)
+                        # Fallback: check for any panel content (phone/address)
                         if not panel_loaded:
                             try:
-                                # Look for address or phone data item IDs in the page source
-                                page_source_lower = self.driver.page_source.lower()
-                                if "phone:tel:" in page_source_lower or "tel:" in page_source_lower or 'data-item-id="address"' in page_source_lower:
+                                src = self.driver.page_source
+                                if "phone:tel:" in src or 'data-item-id="address"' in src:
                                     panel_loaded = True
-                                    log(f"H1 name mismatch but details panel content detected for {name}", "INFO")
                             except:
                                 pass
                                 
-                        if not panel_loaded:
-                            log(f"Dynamic wait for panel details timed out for {name}, proceeding", "WARNING")
                     except Exception as click_err:
                         log(f"Error clicking clinic link: {str(click_err)}", "WARNING")
                         continue
