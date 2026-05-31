@@ -38,22 +38,18 @@ html, body {
 
 .glass-panel:hover {
   border-color: rgba(46, 119, 174, 0.3);
-  box-shadow: 0 0 15px rgba(46, 119, 174, 0.15);
+  box-shadow: 0 0 15px rgba(46, 119, 174, 0.1);
 }
 
 .glow-btn {
   position: relative;
   overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.3s ease;
 }
 
 .glow-btn:hover {
   box-shadow: 0 0 20px var(--glow-primary);
-  transform: translateY(-2px);
-}
-
-.glow-btn:active {
-  transform: translateY(0);
+  transform: translateY(-1px);
 }
 
 .status-pulse {
@@ -65,53 +61,13 @@ html, body {
   animation: pulse 2s infinite;
 }
 
-/* Radar scanning sweep animation */
-.radar-sweep {
-  position: relative;
-  overflow: hidden;
-}
-
-.radar-sweep::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -150%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(46, 119, 174, 0.3) 50%,
-    transparent 100%
-  );
-  animation: sweep 1.5s infinite;
-}
-
-@keyframes sweep {
-  0% { left: -100%; }
-  100% { left: 100%; }
-}
-
 @keyframes pulse {
   0% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.5); opacity: 0.5; }
   100% { transform: scale(1); opacity: 1; }
 }
 
-/* Responsive Overrides & Mobile Layout Grids */
-@media (max-width: 768px) {
-  h1 {
-    font-size: 38px !important;
-    letter-spacing: -1.5px !important;
-  }
-  
-  .glass-panel {
-    padding: 24px 20px !important;
-  }
-}
-
-/* Custom Scrollbars */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: #0A0E14; }
 ::-webkit-scrollbar-thumb { background: #1A1D23; border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: #2E77AE; }

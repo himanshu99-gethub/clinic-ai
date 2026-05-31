@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from './components/Navbar';
 import StatsCard from './components/StatsCard';
 import SearchForm from './components/SearchForm';
 import ClinicTable from './components/ClinicTable';
 import AgentActivityLog from './components/AgentActivityLog';
-import ClinicDrawer from './components/ClinicDrawer';
 
 const getApiUrl = () => {
   if (import.meta.env.VITE_API_BASE_URL) {
@@ -18,6 +16,7 @@ const getApiUrl = () => {
   return '/api';
 };
 const API_BASE_URL = getApiUrl();
+
 
 // Configure axios with better error handling
 axios.interceptors.response.use(
@@ -84,25 +83,23 @@ const TemplateEditor = ({ template, onSave }) => {
   };
 
   return (
-    <div className="glass-panel p-8 md:p-10 relative">
-      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center mb-6">
+    <div className="glass-panel" style={{ padding: '40px', position: 'relative' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <div>
-          <h2 className="text-lg md:text-xl font-black text-white tracking-wider uppercase">Global Protocol Editor</h2>
-          <p className="text-[10px] text-white/30 font-semibold tracking-widest mt-1 uppercase">
-            Configure outreach subject and body
+          <h2 style={{ fontSize: '20px', fontWeight: 900, color: '#fff', textTransform: 'uppercase', letterSpacing: '1px' }}>Global Protocol Editor</h2>
+          <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginTop: '4px', textTransform: 'uppercase', letterSpacing: '2px' }}>
+            Configure your Outreach Subject and Template Body
           </p>
         </div>
-        <button 
-          onClick={handleSave} 
-          className="glow-btn px-6 py-3 bg-[#2E77AE] text-white text-[11px] font-black tracking-widest uppercase rounded-xl border border-white/5 cursor-pointer shadow-lg hover:shadow-[#2E77AE]/35"
-        >
-          💾 Save Protocol
-        </button>
+        <button onClick={handleSave} className="glow-btn" style={{
+          padding: '12px 32px', background: '#2E77AE', border: 'none', borderRadius: '12px',
+          color: '#fff', fontWeight: 800, fontSize: '12px', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '2px'
+        }}>💾 Save Protocol</button>
       </div>
 
       {/* Subject Line */}
-      <div className="mb-6">
-        <label className="block text-[10px] font-black text-[#2E77AE] tracking-widest uppercase mb-2">
+      <div style={{ marginBottom: '24px' }}>
+        <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#2E77AE', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px' }}>
           📧 Email Subject Line
         </label>
         <input 
@@ -110,49 +107,65 @@ const TemplateEditor = ({ template, onSave }) => {
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
           placeholder="Enter outreach subject line..."
-          className="w-full bg-black/30 border border-white/8 rounded-xl px-4 py-3.5 text-white text-sm outline-none focus:border-[#2E77AE] transition-all"
+          style={{
+            width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '10px', padding: '12px 16px', color: '#fff', fontSize: '14px', outline: 'none'
+          }}
         />
       </div>
 
       {/* Email Body */}
-      <div className="mb-6">
-        <label className="block text-[10px] font-black text-[#2E77AE] tracking-widest uppercase mb-2">
+      <div style={{ marginBottom: '24px' }}>
+        <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#2E77AE', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px' }}>
           📝 Email Body Template
         </label>
-        <p className="text-xs text-[#2E77AE] font-semibold mb-2">
-          💡 TIP: Use <code className="text-[#FF8E2B] font-bold">[Clinic Name]</code> as a placeholder for the clinic's name.
+        <p style={{ fontSize: '12px', color: '#2E77AE', fontWeight: 700, marginBottom: '8px' }}>
+          💡 TIP: Use <code style={{ color: '#FF8E2B' }}>[Clinic Name]</code> as a placeholder for the clinic's name.
         </p>
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder="Dear Administrative Team, ..."
-          className="w-full min-h-[220px] bg-black/40 border border-white/8 rounded-xl p-5 text-white text-sm leading-relaxed outline-none focus:border-[#2E77AE] transition-all"
+          style={{
+            width: '100%', minHeight: '260px', background: 'rgba(0,0,0,0.5)',
+            border: '1px solid rgba(255,255,255,0.1)', borderRadius: '14px',
+            padding: '20px', color: '#fff', fontSize: '14px', lineHeight: '1.8', outline: 'none'
+          }}
         />
       </div>
 
       {/* Test Email Tool */}
-      <div className="bg-[#FF8E2B]/5 border border-[#FF8E2B]/15 p-5 rounded-2xl">
-        <div className="flex justify-between items-center mb-3">
-          <p className="text-[10px] text-[#FF8E2B] font-black tracking-widest uppercase">
+      <div style={{ 
+        background: 'rgba(255,142,43,0.05)', border: '1px solid rgba(255,142,43,0.15)',
+        padding: '20px', borderRadius: '16px'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <p style={{ fontSize: '11px', color: '#FF8E2B', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>
             🧪 Send Test Email
           </p>
-          {testingEmail && <span className="text-[10px] text-emerald-400 font-extrabold animate-pulse">SENDING TEST...</span>}
+          {testingEmail && <span style={{ fontSize: '10px', color: '#4ade80', fontWeight: 800, animation: 'pulse 1s infinite' }}>SENDING TEST...</span>}
         </div>
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div style={{ display: 'flex', gap: '12px' }}>
           <input 
             value={testEmail}
             onChange={(e) => setTestEmail(e.target.value)}
             placeholder="Enter recipient email (e.g. your_email@gmail.com)..."
-            className="flex-1 bg-black/30 border border-white/5 rounded-xl px-4 py-3 text-white text-xs outline-none focus:border-[#FF8E2B]/40"
+            style={{
+              flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)',
+              borderRadius: '10px', padding: '10px 16px', color: '#fff', fontSize: '13px', outline: 'none'
+            }}
           />
           <button 
             onClick={handleSendTest}
             disabled={testingEmail}
-            className={`px-5 py-3 rounded-xl text-white text-[11px] font-extrabold tracking-widest uppercase transition-all cursor-pointer ${
-              testingEmail ? 'bg-white/10 text-white/30' : 'bg-[#FF8E2B]/20 hover:bg-[#FF8E2B]/35 border border-[#FF8E2B]/30'
-            }`}
+            style={{
+              padding: '10px 20px', background: testingEmail ? 'rgba(255,255,255,0.1)' : 'rgba(255,142,43,0.2)', 
+              border: '1px solid rgba(255,142,43,0.3)',
+              borderRadius: '10px', color: '#fff', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+              transition: 'all 0.2s', textTransform: 'uppercase'
+            }}
           >
-            {testingEmail ? 'Sending...' : 'Send Test'}
+            {testingEmail ? '⌛ Sending...' : 'Send Test'}
           </button>
         </div>
       </div>
@@ -163,34 +176,25 @@ const TemplateEditor = ({ template, onSave }) => {
 // ── Main App ─────────────────────────────────────────────
 export default function App() {
   const [clinics, setClinics] = useState([]);
-  const [stats, setStats] = useState({ total: 0, verified: 0, unverified: 0, contacted: 0, pending: 0 });
+  const [stats, setStats] = useState({ total: 0, verified: 0, unverified: 0 });
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
   const [activeFilter, setActiveFilter] = useState(null);
   const [sending, setSending] = useState(false);
-  const [toasts, setToasts] = useState([]);
-  const [selectedClinic, setSelectedClinic] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const stopOutreachRef = useRef(false);
 
   // Safety net: loading can NEVER be stuck for more than 15 seconds
   useEffect(() => {
     if (!loading) return;
     const safetyTimer = setTimeout(() => {
       setLoading(false);
-      addToast('Safety Timeout: Scanning forced to complete', 'error');
+      console.warn('[Safety] Loading timeout — forcing reset');
     }, 15000);
     return () => clearTimeout(safetyTimer);
   }, [loading]);
-
-  // Toast Notification System
-  const addToast = (message, type = 'info') => {
-    const id = Date.now();
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 5000);
-  };
+  const [selectedClinic, setSelectedClinic] = useState(null);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const stopOutreachRef = useRef(false);
 
   const getSavedTemplate = () => {
     const saved = localStorage.getItem('outreach_template');
@@ -247,6 +251,7 @@ ClinicFlow AI | Lead Developer`;
         })
       ]);
       
+      // Ensure data is arrays/objects
       setClinics(Array.isArray(clinicsRes.data) ? clinicsRes.data : []);
       setStats(statsRes.data || { total: 0, verified: 0, unverified: 0, contacted: 0, pending: 0 });
       setLogs(Array.isArray(logsRes.data) ? logsRes.data : []);
@@ -263,20 +268,23 @@ ClinicFlow AI | Lead Developer`;
 
   const handleSearch = async (query) => {
     setLoading(true);
+    setMessage('');
     try {
-      await axios.post(`${API_BASE_URL}/search`, {
+      const response = await axios.post(`${API_BASE_URL}/search`, {
         ...query,
         template: globalTemplate
       }, { timeout: 10000 });
       
+      // Set the filter to show results from this search
       setActiveFilter({ 
         city: query.city, 
         country: query.country, 
         specialization: query.specialization 
       });
       
-      addToast(`Discovery sequence launched for ${query.specialization} in ${query.city}!`, 'info');
+      setMessage(`✅ DISCOVERY INITIATED: ${query.specialization.toUpperCase()} in ${query.city.toUpperCase()}. Scanning Google Maps... Please wait.`);
       
+      // Auto-refresh data after a short delay to show initial results
       setTimeout(() => {
         fetchData({ 
           city: query.city, 
@@ -284,9 +292,12 @@ ClinicFlow AI | Lead Developer`;
         });
       }, 3000);
       
+      // Clear message after delay
+      setTimeout(() => setMessage(''), 12000);
     } catch (e) {
       console.error('[Search Error]', e);
-      addToast(`Scan launch failed: ${e.response?.data?.error || 'Connection error'}`, 'error');
+      setMessage(`❌ ERROR: ${e.response?.data?.error || 'Failed to initiate discovery. Check backend connection.'}`);
+      setTimeout(() => setMessage(''), 8000);
     } finally {
       setLoading(false);
     }
@@ -302,40 +313,46 @@ ClinicFlow AI | Lead Developer`;
       localStorage.setItem('outreach_template', val);
       
       const res = await axios.post(`${API_BASE_URL}/template`, { template: val });
-      addToast(res.data.message || 'Global outreach protocol saved', 'success');
+      setMessage(res.data.message || '✅ GLOBAL OUTREACH PROTOCOL SAVED SUCCESSFULLY');
     } catch (e) {
-      console.error('Failed to save template:', e);
-      addToast('Failed to save protocol to database', 'error');
+      console.error('Failed to save template to backend:', e);
+      setMessage('❌ FAILED TO SAVE PROTOCOL TO DATABASE: ' + (e.response?.data?.error || e.message));
+    } finally {
+      setTimeout(() => setMessage(''), 5000);
     }
   };
 
   const handleStopOutreach = () => {
     stopOutreachRef.current = true;
-    addToast('Stopping Outreach Agent... Please wait.', 'info');
+    setMessage('🛑 Stopping Outreach Agent... Please wait.');
   };
 
   const handleOutreach = async () => {
     const clinicsWithEmail = clinics.filter(c => c.email && c.email.trim() !== '');
     
     if (!clinicsWithEmail.length) {
-      addToast('No clinics with verified email addresses found.', 'error');
+      setMessage('⚠️ WARNING: No clinics with email addresses found.');
+      setTimeout(() => setMessage(''), 5000);
       return;
     }
     
     setSending(true);
-    stopOutreachRef.current = false;
+    stopOutreachRef.current = false; // Reset stop flag
     let successCount = 0;
     let failCount = 0;
     
+    // Loop through each clinic and send email individually
     for (let i = 0; i < clinicsWithEmail.length; i++) {
       if (stopOutreachRef.current) {
-        addToast(`Outreach stopped by user. Sent: ${successCount}, Failed: ${failCount}`, 'info');
+        setMessage(`🛑 OUTREACH STOPPED BY USER: Sent: ${successCount}, Failed: ${failCount}`);
         setSending(false);
+        setTimeout(() => setMessage(''), 10000);
         return;
       }
       
       const clinic = clinicsWithEmail[i];
-      addToast(`Sending outreach to ${clinic.name} (${i + 1}/${clinicsWithEmail.length})...`, 'info');
+      const progressMessage = `⏳ Sending email ${i + 1}/${clinicsWithEmail.length} to ${clinic.name}...`;
+      setMessage(progressMessage);
       
       try {
         const res = await axios.post(`${API_BASE_URL}/outreach`, {
@@ -349,19 +366,28 @@ ClinicFlow AI | Lead Developer`;
           failCount++;
         }
       } catch (e) {
-        console.error(e);
+        console.error(`Error sending to ${clinic.name}:`, e);
         failCount++;
       }
       
-      setClinics(prev => prev.map(c => c.name === clinic.name ? { ...c, outreach_status: 'Contacted' } : c));
+      // Update local state to show "Contacted" immediately in the UI grid
+      setClinics(prev => prev.map(c => {
+        if (c.name === clinic.name) {
+          return { ...c, outreach_status: 'Contacted' };
+        }
+        return c;
+      }));
     }
     
-    addToast(`Outreach sequence complete! Sent: ${successCount}, Failed: ${failCount}`, 'success');
+    setMessage(`✅ SUCCESS: Bulk email outreach completed. Sent: ${successCount}, Failed: ${failCount}`);
     setSending(false);
     
+    // Refresh database sync after a short delay
     setTimeout(() => {
       fetchData(activeFilter);
     }, 2000);
+    
+    setTimeout(() => setMessage(''), 10000);
   };
 
   const handleExport = () => {
@@ -376,6 +402,7 @@ ClinicFlow AI | Lead Developer`;
         .join(',')
     );
     
+    // Add UTF-8 BOM for Excel compatibility
     const csvContent = "\uFEFF" + headers.join(',') + '\n' + csvRows.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -387,18 +414,19 @@ ClinicFlow AI | Lead Developer`;
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    addToast('Excel export downloaded successfully!', 'success');
   };
 
   const handleClearAll = async () => {
     try {
       const res = await axios.delete(`${API_BASE_URL}/clinics`);
-      addToast(res.data.message || 'All leads cleared successfully', 'success');
+      setMessage(`🗑️ ${res.data.message || 'All leads deleted successfully.'}`);
       setClinics([]);
       setStats({ total: 0, verified: 0, unverified: 0, contacted: 0, pending: 0 });
+      setTimeout(() => setMessage(''), 5000);
     } catch (e) {
       console.error(e);
-      addToast('Failed to clear database', 'error');
+      setMessage('❌ Failed to clear database: ' + (e.response?.data?.error || e.message));
+      setTimeout(() => setMessage(''), 5000);
     }
   };
 
@@ -409,131 +437,123 @@ ClinicFlow AI | Lead Developer`;
     { title: 'Success Rate', value: stats.total > 0 ? `${Math.round((stats.verified / stats.total) * 100)}%` : '0%', icon: '📊', color: 'blue' },
   ];
 
+  // Logic for Archive view (Contacted only)
   const archivedClinics = clinics.filter(c => c.outreach_status === 'Contacted');
 
   return (
-    <div className="min-h-screen relative text-white bg-[#0A0E14] overflow-x-hidden font-sans">
-      
-      {/* Grid Overlay background */}
-      <div className="fixed inset-0 pointer-events-none z-0 opacity-40 bg-[radial-gradient(rgba(46,119,174,0.08)_1px,transparent_1px)] bg-[size:32px_32px]" />
+    <div style={{ minHeight: '100vh', position: 'relative' }}>
 
-      {/* Floating SaaS Toast Notification Panel */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 pointer-events-none max-w-sm w-full px-6 sm:px-0">
-        <AnimatePresence>
-          {toasts.map(toast => (
-            <motion.div
-              key={toast.id}
-              initial={{ opacity: 0, y: 50, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -20, scale: 0.9, transition: { duration: 0.2 } }}
-              className={`pointer-events-auto p-4 rounded-xl border shadow-2xl flex items-center justify-between gap-3 text-[10px] font-black tracking-widest uppercase ${
-                toast.type === 'success' 
-                  ? 'bg-emerald-950/95 text-emerald-400 border-emerald-500/25' 
-                  : toast.type === 'error'
-                  ? 'bg-red-950/95 text-red-400 border-red-500/25'
-                  : 'bg-slate-950/95 text-sky-400 border-sky-500/25'
-              }`}
-            >
-              <span>{toast.message}</span>
-              <button 
-                onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
-                className="text-white/40 hover:text-white cursor-pointer select-none text-xs focus:outline-none"
-              >
-                ✕
-              </button>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+      {/* Grid Overlay */}
+      <div style={{ 
+        position: 'fixed', inset: 0, 
+        backgroundImage: 'radial-gradient(rgba(46, 119, 174, 0.05) 1px, transparent 1px)', 
+        backgroundSize: '40px 40px', pointerEvents: 'none', zIndex: 0 
+      }} />
 
-      {/* Slide-over Clinic Details Drawer */}
-      <AnimatePresence>
-        {selectedClinic && (
-          <ClinicDrawer 
-            clinic={selectedClinic} 
-            onClose={() => setSelectedClinic(null)}
-            onOutreachSuccess={(name) => {
-              setClinics(prev => prev.map(c => c.name === name ? { ...c, outreach_status: 'Contacted' } : c));
-              fetchData(activeFilter);
-              addToast(`Outreach updated for ${name}`, 'success');
-            }}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Loading Overlay */}
+      {/* Loading overlay */}
       {loading && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0A0E14]/95 backdrop-blur-md">
-          <div className="text-center">
-            <div className="w-20 h-20 rounded-full border-2 border-[#2E77AE]/10 border-t-[#2E77AE] animate-spin mx-auto mb-8 shadow-[0_0_30px_rgba(46,119,174,0.2)]" />
-            <h3 className="text-xs font-black tracking-[8px] text-white uppercase animate-pulse">
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000, display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(10,14,20,0.95)', backdropFilter: 'blur(30px)'
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{
+              width: '100px', height: '100px', borderRadius: '50%',
+              border: '2px solid rgba(46,119,174,0.1)',
+              borderTop: '2px solid #2E77AE',
+              animation: 'spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite',
+              margin: '0 auto 32px',
+              boxShadow: '0 0 30px rgba(46, 119, 174, 0.2)'
+            }} />
+            <h3 style={{ fontSize: '14px', fontWeight: 900, color: '#fff', letterSpacing: '8px', textTransform: 'uppercase' }}>
               Initializing Grid
             </h3>
           </div>
         </div>
       )}
 
-      {/* Content wrapper */}
-      <div className="relative z-10 flex flex-col min-h-screen">
+      <div style={{ position: 'relative', zIndex: 1 }}>
         <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
 
-        <main className="max-w-[1400px] w-full mx-auto px-6 py-10 md:px-12 md:py-16 flex-1">
-          
-          {/* Section Title */}
-          <div className="mb-12">
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-black tracking-tighter leading-none text-white">
-              Mission <span className="text-[#2E77AE]">{activeTab === 'archive' ? 'Archive' : activeTab === 'email_manage' ? 'Control' : 'Control'}.</span>
-            </h1>
-            <p className="text-[11px] text-white/30 font-black tracking-widest mt-4 uppercase">
-              Orbital Intelligence & Outreach Grid
-            </p>
+        <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '40px' }}>
+
+          <div style={{ marginBottom: '60px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+            <div>
+              <h1 style={{ fontSize: '64px', fontWeight: 900, color: '#fff', letterSpacing: '-3px', lineHeight: 0.9 }}>
+                Mission <span style={{ color: '#2E77AE' }}>{activeTab === 'archive' ? 'Archive' : activeTab === 'discovery' ? 'Discovery' : 'Control'}.</span>
+              </h1>
+              <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginTop: '16px', textTransform: 'uppercase', letterSpacing: '4px' }}>
+                Orbital Intelligence & Outreach Grid
+              </p>
+            </div>
           </div>
+
+          {message && (
+            <div className="glass-panel" style={{
+              padding: '20px 32px', marginBottom: '32px',
+              background: message.includes('✅') ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)',
+              border: `1px solid ${message.includes('✅') ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
+              color: message.includes('✅') ? '#4ade80' : '#ffb4ab',
+              fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px'
+            }}>
+              {message}
+            </div>
+          )}
 
           {activeTab === 'dashboard' && (
             <>
-              {/* Stats Card Grid (Fully Responsive) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+              {/* Stats */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '24px', marginBottom: '40px' }}>
                 {statsData.map((s, i) => <StatsCard key={i} {...s} index={i} />)}
               </div>
 
-              {/* Two Column Layout: Stacks on mobile, splits on desktop */}
-              <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-10 items-start">
-                <div className="min-w-0 flex flex-col gap-6">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: '40px', alignItems: 'start' }}>
+                <div style={{ minWidth: 0 }}>
                   <SearchForm onSearch={handleSearch} isLoading={loading} />
 
-                  {/* Backend Status checker card */}
-                  <div className="glass-panel p-8 border border-[#2E77AE]/15">
-                    <div className="flex items-center gap-4 mb-6">
-                      <div className="text-3xl">🤖</div>
+                  <div className="glass-panel" style={{
+                    padding: '32px', border: '1px solid rgba(46,119,174,0.15)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
+                      <div style={{ fontSize: '28px' }}>🤖</div>
                       <div>
-                        <h3 className="text-white text-xs font-black tracking-widest uppercase">AI Outreach Agent</h3>
-                        <p className="text-white/30 text-[10px] font-semibold mt-0.5 uppercase tracking-wider">Protocol Uptime: 99.9% // Secure SMTP Active</p>
+                        <h3 style={{ color: '#fff', fontSize: '14px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px' }}>AI Outreach Agent</h3>
+                        <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', fontWeight: 600 }}>Protocol Uptime: 99.9% // Secure SMTP Active</p>
                       </div>
                     </div>
                     
                     <button 
                       onClick={() => {
-                        addToast('Pinging API Server...', 'info');
+                        setMessage('🔍 Checking backend health...');
                         axios.get(`${API_BASE_URL}/health`)
                           .then(res => {
-                            addToast(`API Active. Database: ${res.data.database}.`, 'success');
+                            setMessage(`✅ BACKEND HEALTHY: Database ${res.data.database}, ${res.data.clinics_count} clinics loaded`);
+                            setTimeout(() => setMessage(''), 5000);
                           })
                           .catch(e => {
-                            addToast('Failed to ping API server', 'error');
+                            setMessage(`❌ BACKEND ERROR: ${e.message}`);
+                            setTimeout(() => setMessage(''), 5000);
                           });
                       }}
-                      className="w-full py-3.5 bg-[#2E77AE]/10 hover:bg-[#2E77AE]/25 border border-[#2E77AE]/20 hover:border-[#2E77AE]/45 rounded-xl text-[#2E77AE] hover:text-white text-[11px] font-black tracking-widest uppercase transition-all duration-300 cursor-pointer"
+                      className="glow-btn"
+                      style={{
+                        width: '100%', padding: '14px', 
+                        background: 'rgba(46,119,174,0.1)', border: '1px solid rgba(46,119,174,0.2)',
+                        borderRadius: '10px', color: '#2E77AE', fontSize: '11px',
+                        fontWeight: 800, cursor: 'pointer', transition: 'all 0.3s',
+                        textTransform: 'uppercase', letterSpacing: '2px'
+                      }}
                     >
                       Check Backend Health
                     </button>
                   </div>
                 </div>
 
-                {/* Activity Feed log panel */}
                 <AgentActivityLog logs={logs} clinicCount={stats.total} verifiedCount={stats.verified} />
+
               </div>
 
-              {/* Clinic Lead Grid Table */}
               <ClinicTable 
                 clinics={clinics} 
                 onExport={handleExport} 
@@ -546,41 +566,62 @@ ClinicFlow AI | Lead Developer`;
           )}
 
           {activeTab === 'email_manage' && (
-            <div className="flex flex-col gap-10">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>
               
-              {/* Compact cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              {/* Outreach Status Cards & Actions */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '24px' }}>
                 
-                {/* Total Emailed card */}
-                <div className="glass-panel p-6 flex items-center gap-5">
-                  <div className="text-3xl bg-[#2E77AE]/10 p-3 rounded-xl border border-[#2E77AE]/15">✉️</div>
+                {/* Total Emailed Card */}
+                <div className="glass-panel" style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+                  <div style={{ fontSize: '32px' }}>✉️</div>
                   <div>
-                    <h4 className="text-white/40 text-[10px] font-black tracking-widest uppercase">Total Emailed</h4>
-                    <p className="text-white text-2xl font-black mt-1 leading-none">{stats.contacted || 0}</p>
+                    <h4 style={{ color: 'rgba(255,255,255,0.4)', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>Total Emailed</h4>
+                    <p style={{ color: '#fff', fontSize: '24px', fontWeight: 900, marginTop: '4px' }}>{stats.contacted || 0}</p>
                   </div>
                 </div>
 
-                {/* Pending Outreach card */}
-                <div className="glass-panel p-6 flex items-center gap-5">
-                  <div className="text-3xl bg-[#FF8E2B]/10 p-3 rounded-xl border border-[#FF8E2B]/15">⏳</div>
+                {/* Pending Outreach Card */}
+                <div className="glass-panel" style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+                  <div style={{ fontSize: '32px' }}>⏳</div>
                   <div>
-                    <h4 className="text-white/40 text-[10px] font-black tracking-widest uppercase">Pending Outreach</h4>
-                    <p className="text-[#FF8E2B] text-2xl font-black mt-1 leading-none">{stats.pending || 0}</p>
+                    <h4 style={{ color: 'rgba(255,255,255,0.4)', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>Pending Outreach</h4>
+                    <p style={{ color: '#FF8E2B', fontSize: '24px', fontWeight: 900, marginTop: '4px' }}>{stats.pending || 0}</p>
                   </div>
                 </div>
+
+                {/* Stop Agent Card/Action */}
+                {sending && (
+                  <div className="glass-panel" style={{ 
+                    padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
+                    border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.05)'
+                  }}>
+                    <button 
+                      onClick={handleStopOutreach}
+                      className="glow-btn"
+                      style={{
+                        padding: '12px 24px', background: '#ef4444', border: 'none', borderRadius: '10px',
+                        color: '#fff', fontWeight: 800, fontSize: '12px', cursor: 'pointer',
+                        textTransform: 'uppercase', letterSpacing: '1px', boxShadow: '0 0 15px rgba(239,68,68,0.4)',
+                        animation: 'pulse 1.5s infinite'
+                      }}
+                    >
+                      🛑 STOP OUTREACH AGENT
+                    </button>
+                  </div>
+                )}
               </div>
 
-              {/* Grid: Editor + Sent Log List */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
+              {/* Two Column Layout for template editing and logs */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px', alignItems: 'start' }}>
                 
                 {/* Template Editor */}
                 <TemplateEditor template={globalTemplate} onSave={handleSaveTemplate} />
                 
-                {/* Sent List panel */}
-                <div className="flex flex-col">
-                  <div className="glass-panel p-8 mb-6 border border-[#2E77AE]/15">
-                    <h3 className="text-white text-sm font-black tracking-widest uppercase mb-1">Outreach Logs</h3>
-                    <p className="text-white/30 text-[10px] font-semibold tracking-wider uppercase">
+                {/* Sent List Table & Stats */}
+                <div>
+                  <div className="glass-panel" style={{ padding: '32px', marginBottom: '24px', border: '1px solid rgba(46,119,174,0.2)' }}>
+                    <h3 style={{ color: '#fff', fontSize: '16px', fontWeight: 900, marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px' }}>Outreach Logs</h3>
+                    <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1.5px' }}>
                       Verified clinic nodes contacted successfully
                     </p>
                   </div>
@@ -597,19 +638,29 @@ ClinicFlow AI | Lead Developer`;
             </div>
           )}
 
-          {/* Footer bar */}
-          <footer className="mt-20 py-8 border-t border-white/5 flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
-            <span className="text-[10px] text-white/15 font-black tracking-widest uppercase">
+
+          <footer style={{
+            marginTop: '100px', padding: '40px 0',
+            borderTop: '1px solid rgba(255,255,255,0.05)',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+          }}>
+            <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.15)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '4px' }}>
               © 2026 CLINICFLOW // MISSION CONTROL UNIT
             </span>
-            <div className="flex gap-6">
+            <div style={{ display: 'flex', gap: '32px' }}>
               {['PROTOCOL', 'ACCESS', 'SECURITY'].map(l => (
-                <a key={l} href="#" className="text-[10px] text-white/15 hover:text-white/30 transition-colors text-decoration-none tracking-widest font-black">{l}</a>
+                <a key={l} href="#" style={{ fontSize: '10px', color: 'rgba(255,255,255,0.15)', textDecoration: 'none', textTransform: 'uppercase', letterSpacing: '2px', fontWeight: 800 }}>{l}</a>
               ))}
             </div>
           </footer>
         </main>
       </div>
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        input::placeholder { color: rgba(255,255,255,0.1); }
+      `}</style>
     </div>
   );
 }
