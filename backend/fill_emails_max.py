@@ -311,36 +311,60 @@ def method_homepage(website: str) -> tuple:
 
 
 def method_subpages(website: str, homepage_html: str) -> str:
-    """M2: Crawl contact/about/team sub-pages."""
+    """M2: Crawl contact/about/team sub-pages in parallel."""
     if not website or not homepage_html:
         return ''
     sub_urls = fetch_sub_urls(website, homepage_html)
-    for url in sub_urls:
-        html = fetch(url, timeout=5)
-        if html:
-            ranked = extract_from_html(html, website)
-            if ranked:
-                log(f"    [M2-SUB] {url} -> {ranked[0]}")
-                return ranked[0]
+    if not sub_urls:
+        return ''
+    
+    def check_url(url):
+        try:
+            html = fetch(url, timeout=3.5)
+            if html:
+                ranked = extract_from_html(html, website)
+                if ranked:
+                    return ranked[0]
+        except Exception:
+            pass
+        return None
+
+    with ThreadPoolExecutor(max_workers=min(len(sub_urls), 5)) as executor:
+        futures = {executor.submit(check_url, url): url for url in sub_urls}
+        for future in as_completed(futures):
+            res = future.result()
+            if res:
+                log(f"    [M2-SUB-PARALLEL] Found: {res}")
+                return res
     return ''
 
 
 def method_deep_crawl(website: str, homepage_html: str) -> str:
-    """M3: Crawl ALL internal links (depth-1), scanning each for emails."""
+    """M3: Crawl internal links (depth-1) in parallel."""
     if not website or not homepage_html:
         return ''
-    all_links = fetch_all_internal_links(website, homepage_html, max_urls=10)
-    visited = set()
-    for url in all_links:
-        if url in visited:
-            continue
-        visited.add(url)
-        html = fetch(url, timeout=5)
-        if html:
-            ranked = extract_from_html(html, website)
-            if ranked:
-                log(f"    [M3-DEEP] {url} -> {ranked[0]}")
-                return ranked[0]
+    all_links = fetch_all_internal_links(website, homepage_html, max_urls=6)
+    if not all_links:
+        return ''
+    
+    def check_url(url):
+        try:
+            html = fetch(url, timeout=3.5)
+            if html:
+                ranked = extract_from_html(html, website)
+                if ranked:
+                    return ranked[0]
+        except Exception:
+            pass
+        return None
+
+    with ThreadPoolExecutor(max_workers=min(len(all_links), 5)) as executor:
+        futures = {executor.submit(check_url, url): url for url in all_links}
+        for future in as_completed(futures):
+            res = future.result()
+            if res:
+                log(f"    [M3-DEEP-PARALLEL] Found: {res}")
+                return res
     return ''
 
 
@@ -601,12 +625,8 @@ def find_email(clinic: dict) -> str:
         log(f"  -> [M6] FOUND: {email}")
         return email
 
-    # ── M7: WHOIS / RDAP ─────────────────────────────────────────────────────
-    if domain:
-        email = method_whois(domain)
-        if email:
-            log(f"  -> [M7] FOUND: {email}")
-            return email
+    # ── M7: WHOIS / RDAP ──
+    # Removed WHOIS lookup because it is slow and blocked by most host providers.
 
     # ── M8: Construct ────────────────────────────────────────────────────────
     email = method_construct(name, domain)

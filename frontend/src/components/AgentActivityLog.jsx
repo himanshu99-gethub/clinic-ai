@@ -5,6 +5,26 @@ const LogItem = ({ log }) => {
   const text = log.text || log.message || "";
   const hasContent = !!log.content;
 
+  const formatLogTime = (ts) => {
+    try {
+      if (!ts) return "";
+      if (ts.includes('T') || ts.includes('Z') || ts.includes('-')) {
+        const date = new Date(ts);
+        const pad = (num) => String(num).padStart(2, '0');
+        const yyyy = date.getFullYear();
+        const mm = pad(date.getMonth() + 1);
+        const dd = pad(date.getDate());
+        const hh = pad(date.getHours());
+        const min = pad(date.getMinutes());
+        const ss = pad(date.getSeconds());
+        return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
+      }
+      return ts;
+    } catch (e) {
+      return ts;
+    }
+  };
+
   const color = text.includes('✅') ? '#4ade80'
     : text.includes('🎯') ? '#fbbf24'
     : text.includes('🚀') ? '#96ccff'
@@ -18,7 +38,7 @@ const LogItem = ({ log }) => {
   return (
     <div style={{ animation: 'fadeSlideIn 0.3s ease-out', marginBottom: '8px' }}>
       <div style={{ display: 'flex', gap: '16px', fontSize: '12px', fontFamily: 'monospace' }}>
-        <span style={{ color: '#2E77AE', fontWeight: 700, opacity: 0.6, whiteSpace: 'nowrap' }}>[{log.timestamp}]</span>
+        <span style={{ color: '#2E77AE', fontWeight: 700, opacity: 0.6, whiteSpace: 'nowrap' }}>[{formatLogTime(log.timestamp)}]</span>
         <span style={{ color, letterSpacing: '0.5px', wordBreak: 'break-word' }}>
           {text}
           {hasContent && (

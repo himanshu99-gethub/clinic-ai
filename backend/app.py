@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 # No psycopg2 needed, using requests for Supabase REST API
 import os
+import datetime
 import time
 import threading
 import smtplib
@@ -210,7 +211,7 @@ def add_log(msg, content=None):
         "id": len(activity_logs),
         "message": msg,
         "content": content,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     }
     activity_logs.append(log_entry)
     log(f"ACTIVITY: {msg}")
@@ -651,7 +652,7 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                     "email": "",
                     "status": "Unverified",
                     "outreach_status": "Pending",
-                    "discovery_date": time.strftime("%Y-%m-%d %H:%M:%S")
+                    "discovery_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 }
                 
                 # Check for duplicates using new strict checks
