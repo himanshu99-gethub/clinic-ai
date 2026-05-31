@@ -131,6 +131,9 @@ class ClinicScraper:
             
             # Extract clinic data from each result
             used_names = set()
+            last_extracted_name = None
+            last_extracted_h1 = None
+            
             # Cap at 30 clinics per query to avoid spending too long on one query
             MAX_PER_QUERY = 30
             for i in range(MAX_PER_QUERY):
@@ -152,52 +155,85 @@ class ClinicScraper:
                     try:
                         # Scroll element into view — minimal sleep
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link)
-                        time.sleep(0.15)
+                        time.sleep(0.2)
                         
                         try:
                             link.click()
                         except Exception:
                             self.driver.execute_script("arguments[0].click();", link)
                         
-                        # Wait for details panel — reduced to 1.5s max, poll every 0.15s
+                        # Wait for details panel — up to 4.0s max, exit early, poll every 0.15s
                         start_time = time.time()
                         panel_loaded = False
-                        clean_name = re.sub(r'[^a-zA-Z0-9]', '', name).lower()
-                        while time.time() - start_time < 1.5:
+                        click_retried = False
+                        
+                        def is_match(name1, name2):
+                            n1 = re.sub(r'[^a-zA-Z0-9\s]', '', name1).lower().split()
+                            n2 = re.sub(r'[^a-zA-Z0-9\s]', '', name2).lower().split()
+                            if not n1 or not n2:
+                                return False
+                            # Ignore common words
+                            ignore = {'in', 'the', 'and', 'clinic', 'clinics', 'private', 'center', 'centre', 'specialist', 'specialists', 'hospital', 'hospitals', 'london', 'uk'}
+                            n1_filtered = [w for w in n1 if w not in ignore]
+                            n2_filtered = [w for w in n2 if w not in ignore]
+                            if not n1_filtered:
+                                n1_filtered = n1
+                            if not n2_filtered:
+                                n2_filtered = n2
+                            overlap = set(n1_filtered).intersection(set(n2_filtered))
+                            return len(overlap) > 0
+
+                        while time.time() - start_time < 4.0:
+                            # Retry JS click if 1.5 seconds pass without panel loaded
+                            if not click_retried and (time.time() - start_time > 1.5):
+                                try:
+                                    self.driver.execute_script("arguments[0].click();", link)
+                                    click_retried = True
+                                    log("Retry clicked clinic link using JS", "INFO")
+                                except:
+                                    pass
+                                    
                             try:
                                 h1_els = self.driver.find_elements(By.TAG_NAME, "h1")
                                 for el in h1_els:
                                     txt = el.text
-                                    if txt:
-                                        clean_txt = re.sub(r'[^a-zA-Z0-9]', '', txt).lower()
-                                        if clean_name in clean_txt or clean_txt in clean_name:
-                                            panel_loaded = True
-                                            break
+                                    if txt and is_match(name, txt):
+                                        # Verify it's not the previous clinic's panel
+                                        if last_extracted_name and last_extracted_name.lower() != name.lower():
+                                            if txt.lower() == last_extracted_name.lower() or (last_extracted_h1 and txt.lower() == last_extracted_h1.lower()):
+                                                # Still showing previous panel
+                                                continue
+                                        panel_loaded = True
+                                        break
                                 if panel_loaded:
                                     break
                             except:
                                 pass
                             time.sleep(0.15)
-                            
-                        # Fallback: check for any panel content (phone/address)
-                        if not panel_loaded:
-                            try:
-                                src = self.driver.page_source
-                                if "phone:tel:" in src or 'data-item-id="address"' in src:
-                                    panel_loaded = True
-                            except:
-                                pass
                                 
                     except Exception as click_err:
                         log(f"Error clicking clinic link: {str(click_err)}", "WARNING")
                         continue
                     
+                    # Ensure panel loaded before extracting
+                    if not panel_loaded:
+                        log(f"⚠️ Skipping {name} - details panel did not load or match within timeout", "WARNING")
+                        continue
+                        
                     # Extract details from the panel
                     clinic_data = self._extract_clinic_panel_details(name)
                     
                     if clinic_data:
                         results.append(clinic_data)
                         used_names.add(name)
+                        last_extracted_name = name
+                        try:
+                            # Capture actual current H1 text
+                            h1_els = self.driver.find_elements(By.TAG_NAME, "h1")
+                            last_extracted_h1 = h1_els[0].text if h1_els else name
+                        except:
+                            last_extracted_h1 = name
+                            
                         log(f"Successfully extracted: {name}")
                         if on_clinic_found:
                             try:
