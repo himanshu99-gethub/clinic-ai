@@ -120,17 +120,7 @@ import json
 DATA_FILE = os.path.join(os.path.dirname(__file__), 'clinics_data.json')
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'settings_data.json')
 
-DEFAULT_TEMPLATE = (
-    "Subject: Strategic Partnership Inquiry | [Clinic Name]\n\n"
-    "Dear Administrative Team,\n\n"
-    "I hope this message finds you well. I am reaching out from ClinicFlow AI on behalf of our healthcare outreach division.\n\n"
-    "We've been closely analyzing clinical excellence in your region, and [Clinic Name] stands out as a leader in patient care and medical innovation.\n\n"
-    "We would love to explore how ClinicFlow AI can help streamline your patient acquisition and operational efficiency.\n\n"
-    "Would you be available for a brief 15-minute call this week?\n\n"
-    "Best regards,\n"
-    "Himanshu Shakya\n"
-    "ClinicFlow AI | Lead Developer"
-)
+DEFAULT_TEMPLATE = ""
 
 def load_template(verbose=True):
     """Load the email template from Supabase or local JSON fallback."""

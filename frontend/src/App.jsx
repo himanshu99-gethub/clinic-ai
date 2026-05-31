@@ -199,21 +199,7 @@ export default function App() {
   const getSavedTemplate = () => {
     const saved = localStorage.getItem('outreach_template');
     if (saved) return saved;
-    return `Subject: Strategic Partnership Inquiry | [Clinic Name]
-
-Dear Administrative Team,
-
-I hope this message finds you well. I am reaching out from ClinicFlow AI on behalf of our healthcare outreach division.
-
-We've been closely analyzing clinical excellence in your region, and [Clinic Name] stands out as a leader in patient care and medical innovation.
-
-We would love to explore how ClinicFlow AI can help streamline your patient acquisition and operational efficiency. 
-
-Would you be available for a brief 15-minute call this week?
-
-Best regards,
-Himanshu Shakya
-ClinicFlow AI | Lead Developer`;
+    return "";
   };
 
   const [globalTemplate, setGlobalTemplate] = useState(getSavedTemplate());
