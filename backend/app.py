@@ -545,9 +545,9 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
         seen_names = set()
         TARGET_CLINICS = 200  # Target: 200 unique clinics
         
-        # ThreadPoolExecutor for background extraction. We run up to 10 workers.
+        # ThreadPoolExecutor for background extraction. We run up to 20 workers.
         # Started here so we can submit tasks dynamically.
-        extraction_executor = ThreadPoolExecutor(max_workers=10)
+        extraction_executor = ThreadPoolExecutor(max_workers=20)
         extraction_futures = []
         verified_count = 0
         real_count = 0

@@ -41,7 +41,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DATA_FILE    = os.path.join(os.path.dirname(__file__), 'clinics_data.json')
-MAX_WORKERS  = 15
+MAX_WORKERS  = 20
 save_lock    = threading.Lock()
 print_lock   = threading.Lock()
 
@@ -215,7 +215,8 @@ def extract_from_html(html: str, site_url: str = '') -> list:
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
 
-def fetch(url: str, timeout=5, headers=None) -> str:
+def fetch(url: str, timeout=3, headers=None) -> str:
+    """Fetch URL with reduced default timeout for speed."""
     hdrs = headers or HEADERS
     try:
         r = requests.get(url, headers=hdrs, timeout=timeout,
@@ -227,7 +228,7 @@ def fetch(url: str, timeout=5, headers=None) -> str:
     return ''
 
 
-def fetch_sub_urls(homepage_url: str, html: str, max_urls=6) -> list:
+def fetch_sub_urls(homepage_url: str, html: str, max_urls=4) -> list:
     """Return list of internal sub-page URLs to check for emails."""
     try:
         parsed = urllib.parse.urlparse(homepage_url)
@@ -271,7 +272,7 @@ def fetch_sub_urls(homepage_url: str, html: str, max_urls=6) -> list:
         return []
 
 
-def fetch_all_internal_links(homepage_url: str, html: str, max_urls=10) -> list:
+def fetch_all_internal_links(homepage_url: str, html: str, max_urls=5) -> list:
     """Collect ALL internal links (depth-1) for deep scan."""
     try:
         parsed = urllib.parse.urlparse(homepage_url)
@@ -302,7 +303,7 @@ def method_homepage(website: str) -> tuple:
     """M1: Scan homepage HTML."""
     if not website:
         return '', ''
-    html = fetch(website, timeout=5)
+    html = fetch(website, timeout=3)
     if html:
         ranked = extract_from_html(html, website)
         if ranked:
@@ -320,7 +321,7 @@ def method_subpages(website: str, homepage_html: str) -> str:
     
     def check_url(url):
         try:
-            html = fetch(url, timeout=3.5)
+            html = fetch(url, timeout=2)
             if html:
                 ranked = extract_from_html(html, website)
                 if ranked:
@@ -329,9 +330,9 @@ def method_subpages(website: str, homepage_html: str) -> str:
             pass
         return None
 
-    with ThreadPoolExecutor(max_workers=min(len(sub_urls), 5)) as executor:
+    with ThreadPoolExecutor(max_workers=min(len(sub_urls), 4)) as executor:
         futures = {executor.submit(check_url, url): url for url in sub_urls}
-        for future in as_completed(futures):
+        for future in as_completed(futures, timeout=8):
             res = future.result()
             if res:
                 log(f"    [M2-SUB-PARALLEL] Found: {res}")
@@ -343,13 +344,13 @@ def method_deep_crawl(website: str, homepage_html: str) -> str:
     """M3: Crawl internal links (depth-1) in parallel."""
     if not website or not homepage_html:
         return ''
-    all_links = fetch_all_internal_links(website, homepage_html, max_urls=6)
+    all_links = fetch_all_internal_links(website, homepage_html, max_urls=5)
     if not all_links:
         return ''
     
     def check_url(url):
         try:
-            html = fetch(url, timeout=3.5)
+            html = fetch(url, timeout=2)
             if html:
                 ranked = extract_from_html(html, website)
                 if ranked:
@@ -360,7 +361,7 @@ def method_deep_crawl(website: str, homepage_html: str) -> str:
 
     with ThreadPoolExecutor(max_workers=min(len(all_links), 5)) as executor:
         futures = {executor.submit(check_url, url): url for url in all_links}
-        for future in as_completed(futures):
+        for future in as_completed(futures, timeout=8):
             res = future.result()
             if res:
                 log(f"    [M3-DEEP-PARALLEL] Found: {res}")
@@ -369,62 +370,57 @@ def method_deep_crawl(website: str, homepage_html: str) -> str:
 
 
 def method_google(clinic_name: str, city: str, domain: str) -> str:
-    """M4: Google search scrape (2 query variants)."""
+    """M4: Google search scrape (1 query variant for speed)."""
     queries = []
     if domain:
-        queries.append(f'site:{domain} email')
-    if clinic_name:
+        queries.append(f'site:{domain} email contact')
+    elif clinic_name:
         clean = re.sub(r'[^\w\s]', '', clinic_name)
-        queries.append(f'"{clean}" {city} email contact'.strip())
+        queries.append(f'"{clean}" {city} email'.strip())
 
-    for q in queries[:2]:
-        url = f"https://www.google.com/search?q={urllib.parse.quote(q)}&num=10"
-        html = fetch(url, timeout=5)
+    for q in queries[:1]:
+        url = f"https://www.google.com/search?q={urllib.parse.quote(q)}&num=5"
+        html = fetch(url, timeout=3)
         if html:
             ranked = extract_from_html(html, domain)
             if ranked:
                 log(f"    [M4-GOOGLE] {ranked[0]}")
                 return ranked[0]
-        time.sleep(0.1)
     return ''
 
 
 def method_bing(clinic_name: str, city: str, domain: str) -> str:
-    """M5: Bing search scrape (2 query variants)."""
+    """M5: Bing search scrape (1 query variant for speed)."""
     queries = []
     if domain:
         queries.append(f'site:{domain} email')
-    if clinic_name:
+    elif clinic_name:
         clean = re.sub(r'[^\w\s]', '', clinic_name)
         queries.append(f'"{clean}" {city} email'.strip())
 
-    for q in queries[:2]:
-        url = f"https://www.bing.com/search?q={urllib.parse.quote(q)}&count=10"
-        html = fetch(url, timeout=5, headers=BING_HEADERS)
+    for q in queries[:1]:
+        url = f"https://www.bing.com/search?q={urllib.parse.quote(q)}&count=5"
+        html = fetch(url, timeout=3, headers=BING_HEADERS)
         if html:
             ranked = extract_from_html(html, domain)
             if ranked:
                 log(f"    [M5-BING] {ranked[0]}")
                 return ranked[0]
-        time.sleep(0.1)
     return ''
 
 
 def method_duckduckgo(clinic_name: str, city: str, domain: str) -> str:
-    """M6: DuckDuckGo HTML search scrape (1 query variant)."""
-    queries = []
-    if domain:
-        queries.append(f'site:{domain} email')
-
-    for q in queries[:1]:
-        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q)}"
-        html = fetch(url, timeout=5)
-        if html:
-            ranked = extract_from_html(html, domain)
-            if ranked:
-                log(f"    [M6-DDG] {ranked[0]}")
-                return ranked[0]
-        time.sleep(0.1)
+    """M6: DuckDuckGo HTML search scrape (only if domain available)."""
+    if not domain:
+        return ''
+    q = f'site:{domain} email contact'
+    url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q)}"
+    html = fetch(url, timeout=3)
+    if html:
+        ranked = extract_from_html(html, domain)
+        if ranked:
+            log(f"    [M6-DDG] {ranked[0]}")
+            return ranked[0]
     return ''
 
 
@@ -468,52 +464,36 @@ def domain_resolves(domain: str) -> bool:
 
 
 def search_website_on_google(clinic_name: str, city: str) -> str:
-    """Search Google/Bing to find the official website of the clinic if missing."""
+    """Search Google to find the official website of the clinic if missing (fast, 1 query)."""
     if not clinic_name:
         return ""
     
     clean_name = re.sub(r'[^\w\s]', '', clinic_name)
-    queries = [
-        f'"{clean_name}" {city} website',
-        f'"{clean_name}" official website'
+    q = f'"{clean_name}" {city} official website'
+    
+    ignore = [
+        'google.com', 'facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com',
+        'youtube.com', 'yelp.', 'tripadvisor.', 'yell.com', 'nhs.uk', 'map', 'search',
+        'bing.com', 'microsoft.com',
     ]
     
-    for q in queries:
-        try:
-            # Try Google first
-            url = f"https://www.google.com/search?q={urllib.parse.quote(q)}&num=3"
-            html = fetch(url, timeout=5)
-            if html:
-                soup = BeautifulSoup(html, 'html.parser')
-                for a in soup.find_all('a', href=True):
-                    href = a['href']
-                    if '/url?q=' in href:
-                        try:
-                            href = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)['q'][0]
-                        except:
-                            continue
-                    if href.startswith('http'):
-                        ignore = ['google.com', 'facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com', 
-                                  'youtube.com', 'yelp.', 'tripadvisor.', 'yell.com', 'nhs.uk', 'map', 'search']
-                        if not any(ig in href.lower() for ig in ignore):
-                            log(f"    [WEBSITE SEARCH] Found website via Google: {href}")
-                            return href
-            
-            # Fallback to Bing
-            url = f"https://www.bing.com/search?q={urllib.parse.quote(q)}&count=3"
-            html = fetch(url, timeout=5, headers=BING_HEADERS)
-            if html:
-                soup = BeautifulSoup(html, 'html.parser')
-                for a in soup.find_all('a', href=True):
-                    href = a['href']
-                    if href.startswith('http'):
-                        ignore = ['google.com', 'facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com', 
-                                  'youtube.com', 'yelp.', 'tripadvisor.', 'yell.com', 'nhs.uk', 'bing.com', 'microsoft.com']
-                        if not any(ig in href.lower() for ig in ignore):
-                            log(f"    [WEBSITE SEARCH] Found website via Bing: {href}")
-                            return href
-        except Exception as e:
-            log(f"    [WARNING] Website search error: {e}")
+    try:
+        url = f"https://www.google.com/search?q={urllib.parse.quote(q)}&num=3"
+        html = fetch(url, timeout=3)
+        if html:
+            soup = BeautifulSoup(html, 'html.parser')
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if '/url?q=' in href:
+                    try:
+                        href = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)['q'][0]
+                    except:
+                        continue
+                if href.startswith('http') and not any(ig in href.lower() for ig in ignore):
+                    log(f"    [WEBSITE SEARCH] Found: {href}")
+                    return href
+    except Exception as e:
+        log(f"    [WARNING] Website search error: {e}")
     return ""
 
 
@@ -554,7 +534,7 @@ def find_email(clinic: dict) -> str:
         if website.startswith('/aclk') or 'google.com/aclk' in website or '/url?q=' in website or 'google.com/url?' in website:
             try:
                 url = 'https://www.google.com' + website if website.startswith('/') else website
-                resp = requests.get(url, timeout=10, allow_redirects=True, headers=HEADERS)
+                resp = requests.get(url, timeout=5, allow_redirects=True, headers=HEADERS)
                 website = resp.url
                 log(f"    [RESOLVED AD LINK] Real URL: {website}")
             except Exception as e:
