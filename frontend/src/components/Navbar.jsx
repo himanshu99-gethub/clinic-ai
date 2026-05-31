@@ -1,5 +1,3 @@
-import React from 'react';
-
 const Navbar = ({ activeTab, onTabChange }) => {
   const navItems = [
     { id: 'dashboard', label: 'MISSION CONTROL' },
@@ -31,7 +29,7 @@ const Navbar = ({ activeTab, onTabChange }) => {
               key={item.id}
               onClick={() => onTabChange(item.id)}
               style={{
-                padding: '10px 28px', border: 'none', borderRadius: '10px',
+                padding: '10px 28px', borderRadius: '10px',
                 fontSize: '11px', fontWeight: 800, cursor: 'pointer',
                 letterSpacing: '1.5px', transition: 'all 0.3s',
                 background: activeTab === item.id ? 'rgba(46,119,174,0.2)' : 'transparent',
