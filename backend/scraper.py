@@ -44,9 +44,6 @@ class ClinicScraper:
             options.add_argument("--window-size=1920,1080")
             options.add_argument("--start-maximized")
             
-            # Prevent connection issues on limited Linux containers
-            options.add_argument("--remote-debugging-port=9222")
-            
             # Eager page load strategy so Selenium doesn't wait for heavy map assets/tiles
             options.page_load_strategy = 'eager'
             
@@ -57,7 +54,15 @@ class ClinicScraper:
                 log(f"Render custom Chrome path detected: {render_chrome_path}", "INFO")
                 options.binary_location = render_chrome_path
             
-            self.driver = webdriver.Chrome(options=options)
+            try:
+                from selenium.webdriver.chrome.service import Service
+                from webdriver_manager.chrome import ChromeDriverManager
+                log("Installing ChromeDriver using webdriver_manager...")
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=options)
+            except Exception as manager_err:
+                log(f"webdriver_manager failed: {manager_err}. Falling back to default chromedriver.", "WARNING")
+                self.driver = webdriver.Chrome(options=options)
             # Remove navigator.webdriver flag to bypass bot detection
             self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
                 "source": """
@@ -73,7 +78,7 @@ class ClinicScraper:
             log(error_msg, "ERROR")
             raise Exception(error_msg)
 
-    def search_google_maps(self, query, on_clinic_found=None):
+    def search_google_maps(self, query, on_clinic_found=None, exclude_names=None):
         """Scrape clinics from Google Maps with robust error handling."""
         log(f"Starting Google Maps search for: {query}")
         results = []
@@ -112,17 +117,23 @@ class ClinicScraper:
             links = self.driver.find_elements(By.CLASS_NAME, "hfpxzc")
             log(f"Found {len(links)} clinic links on initial load")
             
-            # Scroll to load more results — cap at 6 iterations for speed, 1.0s sleep
+            # Scroll to load more results — cap at 8 iterations, break if we have >= 80 links
             no_new_count = 0
-            for scroll_count in range(6):
+            for scroll_count in range(8):
                 try:
                     self.driver.execute_script("""
                         var results_div = document.querySelector('div[role="feed"]') || document.querySelector('[role="main"]') || document.body;
                         results_div.scrollTop += 3000;
                     """)
-                    time.sleep(1.0)
+                    time.sleep(0.8)
                     new_links = self.driver.find_elements(By.CLASS_NAME, "hfpxzc")
                     log(f"After scroll {scroll_count + 1}: Found {len(new_links)} total links")
+                    
+                    if len(new_links) >= 80:
+                        log(f"Found {len(new_links)} links (>= 80). Stopping scrolls early for speed.", "INFO")
+                        links = new_links
+                        break
+                        
                     if len(new_links) == len(links):
                         no_new_count += 1
                         if no_new_count >= 2:
@@ -140,8 +151,8 @@ class ClinicScraper:
             last_extracted_name = None
             last_extracted_h1 = None
             
-            # Cap at 30 clinics per query to avoid spending too long on one query
-            MAX_PER_QUERY = 30
+            # Cap at 120 clinics per query to ensure we can gather enough leads
+            MAX_PER_QUERY = 120
             for i in range(MAX_PER_QUERY):
                 try:
                     # Re-find links dynamically to prevent StaleElementReferenceException
@@ -154,6 +165,8 @@ class ClinicScraper:
                     name = link.get_attribute('aria-label')
                     if not name or name in used_names:
                         continue
+                    if exclude_names and name.strip().lower() in exclude_names:
+                        continue
                     
                     log(f"Processing clinic {i+1}: {name}")
                     
@@ -161,14 +174,14 @@ class ClinicScraper:
                     try:
                         # Scroll element into view — minimal sleep
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link)
-                        time.sleep(0.2)
+                        time.sleep(0.1)
                         
                         try:
                             link.click()
                         except Exception:
                             self.driver.execute_script("arguments[0].click();", link)
                         
-                        # Wait for details panel — up to 2.0s max, exit early, poll every 0.1s
+                        # Wait for details panel — up to 2.0s max, exit early, poll every 0.15s using fast JS execution
                         start_time = time.time()
                         panel_loaded = False
                         click_retried = False
@@ -200,22 +213,31 @@ class ClinicScraper:
                                     pass
                                     
                             try:
-                                h1_els = self.driver.find_elements(By.TAG_NAME, "h1")
-                                for el in h1_els:
-                                    txt = el.text
+                                # Highly optimized JS execution to get titles of all potential elements on the page
+                                txts = self.driver.execute_script("""
+                                    var elements = document.querySelectorAll('h1, .DUwDvf, .qBF1Pd');
+                                    var result = [];
+                                    for (var i = 0; i < elements.length; i++) {
+                                        var txt = elements[i].textContent;
+                                        if (txt) result.push(txt.trim());
+                                    }
+                                    return result;
+                                """)
+                                matched = False
+                                for txt in txts:
                                     if txt and is_match(name, txt):
                                         # Verify it's not the previous clinic's panel
                                         if last_extracted_name and last_extracted_name.lower() != name.lower():
                                             if txt.lower() == last_extracted_name.lower() or (last_extracted_h1 and txt.lower() == last_extracted_h1.lower()):
-                                                # Still showing previous panel
                                                 continue
                                         panel_loaded = True
+                                        matched = True
                                         break
-                                if panel_loaded:
+                                if matched:
                                     break
                             except:
                                 pass
-                            time.sleep(0.1)
+                            time.sleep(0.15)
                                 
                     except Exception as click_err:
                         log(f"Error clicking clinic link: {str(click_err)}", "WARNING")
@@ -234,9 +256,17 @@ class ClinicScraper:
                         used_names.add(name)
                         last_extracted_name = name
                         try:
-                            # Capture actual current H1 text
-                            h1_els = self.driver.find_elements(By.TAG_NAME, "h1")
-                            last_extracted_h1 = h1_els[0].text if h1_els else name
+                            # Capture actual current title text
+                            title_els = []
+                            try:
+                                title_els.extend(self.driver.find_elements(By.TAG_NAME, "h1"))
+                            except:
+                                pass
+                            try:
+                                title_els.extend(self.driver.find_elements(By.CLASS_NAME, "qBF1Pd"))
+                            except:
+                                pass
+                            last_extracted_h1 = title_els[0].text if title_els else name
                         except:
                             last_extracted_h1 = name
                             
@@ -262,16 +292,67 @@ class ClinicScraper:
     def _extract_clinic_panel_details(self, clinic_name):
         """Extract details from the Google Maps clinic panel."""
         try:
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            # Using highly optimized JS execution instead of slow page_source dumping and BeautifulSoup parsing
+            details = self.driver.execute_script("""
+                var website = "";
+                var phone = "";
+                var address = "";
+                
+                // 1. Website extraction
+                var authLink = document.querySelector('a[data-item-id="authority"]');
+                if (authLink && authLink.href) {
+                    website = authLink.href;
+                } else {
+                    var links = document.querySelectorAll('a[href]');
+                    for (var i = 0; i < links.length; i++) {
+                        var href = links[i].href;
+                        if (href && !href.includes('google.com') && !href.includes('google.co') && !href.startsWith('tel:') && !href.startsWith('mailto:')) {
+                            website = href;
+                            break;
+                        }
+                    }
+                }
+                
+                // 2. Phone extraction
+                var phoneEl = document.querySelector('[data-item-id^="phone:tel:"]');
+                if (phoneEl) {
+                    var itemId = phoneEl.getAttribute('data-item-id');
+                    phone = itemId.replace('phone:tel:', '').trim();
+                } else {
+                    var telLinks = document.querySelectorAll('a[href^="tel:"]');
+                    for (var i = 0; i < telLinks.length; i++) {
+                        var telHref = telLinks[i].getAttribute('href');
+                        if (telHref) {
+                            var tel = telHref.replace('tel:', '').trim();
+                            if (tel && tel.length > 5) {
+                                phone = tel;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // 3. Address extraction
+                var addressEl = document.querySelector('[data-item-id="address"]');
+                if (addressEl) {
+                    address = addressEl.textContent.trim();
+                } else {
+                    var anyAddr = document.querySelector('[data-item-id*="address"]');
+                    if (anyAddr) {
+                        address = anyAddr.textContent.trim();
+                    }
+                }
+                
+                return {
+                    website: website,
+                    phone: phone,
+                    address: address
+                };
+            """)
             
-            # Extract website
-            website = self._extract_website_from_panel(soup)
-            
-            # Extract phone
-            phone = self._extract_phone_from_panel(soup)
-            
-            # Extract address
-            address = self._extract_address_from_panel(soup)
+            website = self._clean_google_url(details.get("website", ""))
+            phone = details.get("phone", "")
+            address = details.get("address", "")
             
             # Requirement: MUST have at least website or phone to proceed
             if not website and not phone:

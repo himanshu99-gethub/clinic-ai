@@ -20,7 +20,10 @@ if hasattr(sys.stdout, 'reconfigure'):
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
-load_dotenv()
+# Load .env file from the backend directory specifically
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(dotenv_path=os.path.join(backend_dir, '.env'))
+
 
 # Set up static folder pointing to the built React frontend dist folder
 dist_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'frontend', 'dist')
@@ -462,15 +465,9 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
     log(f"[SCRAPER_TASK_START] Starting scraper task for {specialization} in {city}, {country}", "INFO")
     add_log(f"🚀 DISCOVERY INITIATED: {specialization} in {city}, {country or 'Global'}")
     
-    # Clear all previous clinics to start completely fresh for the new search
-    live_db = []
-    save_data()
-    log("Cleared previous clinics from memory and file storage.", "INFO")
-    
-    if supabase_connected:
-        success = supabase_delete("clinics", {"id": "gt.0"})
-        if success:
-            log("Cleared previous clinics from Supabase table.", "INFO")
+    # Load existing clinics from memory/file storage to append new results
+    live_db = load_data(verbose=False)
+    log("Loaded existing clinics to append new search results.", "INFO")
 
     scraper = None
     try:
@@ -514,7 +511,8 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
         log(f"[SCRAPER_TASK_QUERY_SETUP] Generated {len(query_variations)} unique query variations", "INFO")
             
         results = []
-        seen_names = set()
+        # Populate seen_names from memory (live_db) to avoid scraping duplicates in subsequent runs or queries
+        seen_names = {c["name"].strip().lower() for c in live_db if c.get("name")}
         TARGET_CLINICS = 200  # Target: 200 unique clinics
         
         # ThreadPoolExecutor for background extraction. We run up to 20 workers.
@@ -631,7 +629,7 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                 if not is_duplicate_clinic(clinic_data, check_supabase=False):
                     live_db.append(clinic_data)
                     save_data()  # Persist to disk immediately
-                    add_log(f"✨ Found clinic #{len(results)}: {clinic_data['name']}")
+                    add_log(f"✨ Found clinic #{len(live_db)}: {clinic_data['name']}")
                     log(f"Streamed clinic: {clinic_data['name']}", "OK")
                     
                     # Submit to background extraction pool
@@ -641,20 +639,62 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
         log(f"[SCRAPER_TASK_SEARCH_LOOP] Starting query loop — Target: {TARGET_CLINICS} unique clinics", "INFO")
         for idx, query in enumerate(query_variations):
             # Stop if we've already found enough clinics
-            if len(results) >= TARGET_CLINICS:
-                log(f"[SCRAPER_TASK_TARGET_REACHED] Reached {TARGET_CLINICS} clinics, stopping queries", "INFO")
+            if len(live_db) >= TARGET_CLINICS:
+                log(f"[SCRAPER_TASK_TARGET_REACHED] Reached {TARGET_CLINICS} unique clinics, stopping queries", "INFO")
                 add_log(f"🎯 Target of {TARGET_CLINICS} clinics reached after query {idx+1}. Stopping search.")
                 break
 
-            log(f"[SCRAPER_TASK_QUERY_{idx}] Query {idx+1}/{len(query_variations)}: {query} (found {len(results)} so far)", "INFO")
-            add_log(f"🔍 Query {idx+1}/{len(query_variations)}: {query} | Found so far: {len(results)}")
+            log(f"[SCRAPER_TASK_QUERY_{idx}] Query {idx+1}/{len(query_variations)}: {query} (found {len(live_db)} so far)", "INFO")
+            add_log(f"🔍 Query {idx+1}/{len(query_variations)}: {query} | Found so far: {len(live_db)}")
             
             try:
-                scraper.search_google_maps(query, on_clinic_found=on_clinic_found)
+                scraper.search_google_maps(query, on_clinic_found=on_clinic_found, exclude_names=seen_names)
                 add_log(f"Query {idx+1} done. Total unique clinics: {len(results)}")
             except Exception as query_err:
                 log(f"[SCRAPER_TASK_QUERY_{idx}_ERROR] Query failed: {str(query_err)}\n{traceback.format_exc()}", "ERROR")
                 add_log(f"Query {idx+1} failed: {str(query_err)}", "WARNING")
+
+
+        # Ensure we have at least 100 unique clinics. If not, trigger expansion queries.
+        if len(live_db) < 100:
+            log(f"[SCRAPER_TASK_EXPANSION] Only found {len(live_db)} unique clinics. Initiating search expansion...", "INFO")
+            add_log(f"⚠️ Search yielded only {len(live_db)} clinics. Triggering dynamic search expansion to meet 100+ target...")
+            
+            expansion_queries = [
+                f"{specialization} near {city}",
+                f"{specialization} in {city} surrounding areas",
+                f"{specialization} in {city} region",
+                f"medical clinic in {city}",
+                f"private clinic in {city}",
+                f"doctors in {city}",
+                f"health center in {city}",
+                f"hospital in {city}"
+            ]
+            if country:
+                expansion_queries = [f"{q}, {country}" for q in expansion_queries]
+                
+            # Filter duplicates or queries we already ran
+            unique_exp_queries = []
+            for eq in expansion_queries:
+                if eq.lower() not in seen_qs:
+                    seen_qs.add(eq.lower())
+                    unique_exp_queries.append(eq)
+            
+            for idx_exp, query in enumerate(unique_exp_queries):
+                if len(live_db) >= 100:
+                    log(f"[SCRAPER_TASK_EXPANSION_TARGET_REACHED] Reached {len(live_db)} unique clinics, stopping expansion", "INFO")
+                    add_log(f"🎯 Target of 100+ unique clinics reached during search expansion. Stopping search.")
+                    break
+                    
+                log(f"[SCRAPER_TASK_EXPANSION_{idx_exp}] Expansion Query {idx_exp+1}/{len(unique_exp_queries)}: {query} (found {len(live_db)} so far)", "INFO")
+                add_log(f"🔍 Expansion Query {idx_exp+1}/{len(unique_exp_queries)}: {query} | Found so far: {len(live_db)}")
+                
+                try:
+                    scraper.search_google_maps(query, on_clinic_found=on_clinic_found, exclude_names=seen_names)
+                    add_log(f"Expansion Query {idx_exp+1} done. Total unique clinics: {len(results)}")
+                except Exception as query_err:
+                    log(f"[SCRAPER_TASK_EXPANSION_{idx_exp}_ERROR] Expansion query failed: {str(query_err)}\n{traceback.format_exc()}", "ERROR")
+                    add_log(f"Expansion Query {idx_exp+1} failed: {str(query_err)}", "WARNING")
 
         
         if not results:
