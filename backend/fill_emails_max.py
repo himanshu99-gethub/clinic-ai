@@ -105,10 +105,11 @@ JUNK_EXTS = (
 
 PREFERRED = [
     'info', 'contact', 'hello', 'enquiry', 'inquiry',
+    'sales', 'support', 'team', 'admin', 'office', 'help', 'ask',
+    'partner', 'partners', 'jobs', 'careers', 'marketing', 'media',
     'appointment', 'appointments', 'secretary', 'reception',
-    'admin', 'office', 'clinic', 'mail', 'support', 'team',
-    'care', 'dental', 'doctor', 'dr', 'practice', 'surgery',
-    'bookings', 'book', 'help', 'ask',
+    'clinic', 'care', 'dental', 'doctor', 'dr', 'practice', 'surgery',
+    'bookings', 'book', 'mail',
 ]
 
 CONTACT_SLUGS = [
@@ -117,13 +118,14 @@ CONTACT_SLUGS = [
     '/team', '/staff', '/email', '/connect', '/appointments',
     '/book', '/book-appointment', '/booking', '/appointments',
     '/enquiry', '/enquiries', '/find-us', '/visit-us', '/location',
-    '/locations', '/surgery',
+    '/locations', '/surgery', '/sales', '/careers', '/jobs', '/partners',
+    '/pricing',
 ]
 
 CONSTRUCT_PREFIXES = [
-    'info', 'contact', 'hello', 'reception', 'admin',
-    'enquiries', 'enquiry', 'appointments', 'dental',
-    'clinic', 'practice', 'office', 'team', 'hello',
+    'info', 'contact', 'hello', 'support', 'sales', 'admin',
+    'office', 'team', 'reception', 'enquiries', 'enquiry',
+    'appointments', 'clinic', 'practice', 'dental'
 ]
 
 

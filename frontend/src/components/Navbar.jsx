@@ -17,9 +17,9 @@ const Navbar = ({ activeTab, onTabChange }) => {
             width: '36px', height: '36px', background: 'linear-gradient(135deg, #2E77AE, #1d5c8a)', 
             borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', 
             fontWeight: 900, color: '#fff', boxShadow: '0 0 15px rgba(46, 119, 174, 0.3)' 
-          }}>C</div>
+          }}>L</div>
           <span style={{ fontSize: '15px', fontWeight: 900, color: '#fff', letterSpacing: '2px' }}>
-            CLINICFLOW <span style={{ color: '#2E77AE' }}>AI</span>
+            LEADFLOW <span style={{ color: '#2E77AE' }}>AI</span>
           </span>
         </div>
 

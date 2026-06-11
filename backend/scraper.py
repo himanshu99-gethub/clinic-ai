@@ -731,7 +731,8 @@ class ClinicScraper:
                 'contact', 'about', 'reach', 'email', 'touch', 'info',
                 'support', 'help', 'feedback', 'inquiry', 'enquiry',
                 'communicate', 'message', 'team', 'staff', 'clinic',
-                'appointment', 'book', 'refer'
+                'appointment', 'book', 'refer', 'sales', 'jobs', 'careers',
+                'partner', 'partnership', 'office'
             ]
 
             for a in soup.find_all('a', href=True):

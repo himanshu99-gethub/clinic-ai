@@ -57,7 +57,7 @@ const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach, isSending, onCl
         <div>
           <h2 style={{ fontSize: '22px', fontWeight: 900, color: '#fff' }}>📡 Intelligence Feed</h2>
           <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.35)', marginTop: '4px' }}>
-            {filteredClinics.length} clinical nodes identified in current grid
+            {filteredClinics.length} B2B lead nodes identified in current grid
           </p>
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -112,7 +112,7 @@ const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach, isSending, onCl
           {onClearAll && clinics.length > 0 && (
             <button 
               onClick={() => {
-                if (window.confirm("Are you sure you want to delete all clinical leads? This will clear the entire database!")) {
+                if (window.confirm("Are you sure you want to delete all B2B leads? This will clear the entire database!")) {
                   onClearAll();
                 }
               }}
@@ -140,7 +140,7 @@ const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach, isSending, onCl
         {filteredClinics.length === 0 ? (
           <div style={{ padding: '80px', textAlign: 'center', color: 'rgba(255,255,255,0.2)' }}>
             <div style={{ fontSize: '48px', marginBottom: '16px' }}>🌐</div>
-            <p style={{ fontSize: '15px', fontWeight: 600 }}>No clinical nodes match the current filter.</p>
+            <p style={{ fontSize: '15px', fontWeight: 600 }}>No B2B lead nodes match the current filter.</p>
             <p style={{ fontSize: '13px', marginTop: '8px', opacity: 0.6 }}>Try changing the filter or running a new scan.</p>
           </div>
         ) : (
@@ -148,8 +148,8 @@ const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach, isSending, onCl
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
-                  <th style={thStyle}>Clinic</th>
-                  <th style={thStyle}>Specialization</th>
+                  <th style={thStyle}>Business / Company</th>
+                  <th style={thStyle}>Category / Niche</th>
                   <th style={thStyle}>Contact</th>
                   <th style={thStyle}>Location</th>
                   <th style={thStyle}>Status</th>

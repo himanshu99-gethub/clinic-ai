@@ -120,7 +120,7 @@ const TemplateEditor = ({ template, onSave }) => {
           📝 Email Body Template
         </label>
         <p style={{ fontSize: '12px', color: '#2E77AE', fontWeight: 700, marginBottom: '8px' }}>
-          💡 TIP: Use <code style={{ color: '#FF8E2B' }}>[Clinic Name]</code> as a placeholder for the clinic's name.
+          💡 TIP: Use <code style={{ color: '#FF8E2B' }}>[Business Name]</code> or <code style={{ color: '#FF8E2B' }}>[Company Name]</code> as a placeholder for the business name.
         </p>
         <textarea
           value={body}
@@ -317,7 +317,7 @@ export default function App() {
     const clinicsWithEmail = clinics.filter(c => c.email && c.email.trim() !== '');
     
     if (!clinicsWithEmail.length) {
-      setMessage('⚠️ WARNING: No clinics with email addresses found.');
+      setMessage('⚠️ WARNING: No leads with email addresses found.');
       setTimeout(() => setMessage(''), 5000);
       return;
     }
@@ -378,7 +378,7 @@ export default function App() {
 
   const handleExport = () => {
     if (!clinics.length) return;
-    const headers = ['Name', 'Specialization', 'City', 'Country', 'Email', 'Phone', 'Website', 'Address'];
+    const headers = ['Name', 'Category', 'City', 'Country', 'Email', 'Phone', 'Website', 'Address'];
     const csvRows = clinics.map(c =>
       [c.name, c.specialization, c.city, c.country, c.email, c.phone, c.website, c.address]
         .map(v => {
@@ -395,7 +395,7 @@ export default function App() {
     
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `clinic_grid_export_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `leadflow_leads_export_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -417,9 +417,9 @@ export default function App() {
   };
 
   const statsData = [
-    { title: 'Global Nodes', value: stats.total, icon: '🏥', color: 'blue' },
-    { title: 'Node Verified', value: stats.verified, icon: '✅', color: 'blue' },
-    { title: 'Queueing', value: stats.unverified, icon: '⏳', color: 'orange' },
+    { title: 'Total Leads', value: stats.total, icon: '🏢', color: 'blue' },
+    { title: 'Leads Verified', value: stats.verified, icon: '✅', color: 'blue' },
+    { title: 'Processing', value: stats.unverified, icon: '⏳', color: 'orange' },
     { title: 'Success Rate', value: stats.total > 0 ? `${Math.round((stats.verified / stats.total) * 100)}%` : '0%', icon: '📊', color: 'blue' },
   ];
 
@@ -514,7 +514,7 @@ export default function App() {
                         setMessage('🔍 Checking backend health...');
                         axios.get(`${API_BASE_URL}/health`)
                           .then(res => {
-                            setMessage(`✅ BACKEND HEALTHY: Database ${res.data.database}, ${res.data.clinics_count} clinics loaded`);
+                            setMessage(`✅ BACKEND HEALTHY: Database ${res.data.database}, ${res.data.clinics_count} leads loaded`);
                             setTimeout(() => setMessage(''), 5000);
                           })
                           .catch(e => {
@@ -608,7 +608,7 @@ export default function App() {
                   <div className="glass-panel" style={{ padding: '32px', marginBottom: '24px', border: '1px solid rgba(46,119,174,0.2)' }}>
                     <h3 style={{ color: '#fff', fontSize: '16px', fontWeight: 900, marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px' }}>Outreach Logs</h3>
                     <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1.5px' }}>
-                      Verified clinic nodes contacted successfully
+                      Verified B2B lead nodes contacted successfully
                     </p>
                   </div>
                   <ClinicTable 
@@ -631,7 +631,7 @@ export default function App() {
             display: 'flex', justifyContent: 'space-between', alignItems: 'center'
           }}>
             <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.15)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '4px' }}>
-              © 2026 CLINICFLOW // MISSION CONTROL UNIT
+              © 2026 LEADFLOW AI // MISSION CONTROL UNIT
             </span>
             <div style={{ display: 'flex', gap: '32px' }}>
               {['PROTOCOL', 'ACCESS', 'SECURITY'].map(l => (

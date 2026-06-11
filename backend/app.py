@@ -326,16 +326,17 @@ def auto_send(clinic, template=None):
                 if len(lines) > 1:
                     body = lines[1].strip()
             
-            # Replace placeholder [Clinic Name] with actual name
-            subject = subject.replace("[Clinic Name]", clinic_name)
-            body = body.replace("[Clinic Name]", clinic_name)
+            # Replace placeholder variants with actual name
+            for placeholder in ["[Clinic Name]", "[Business Name]", "[Company Name]", "[Lead Name]", "[Name]"]:
+                subject = subject.replace(placeholder, clinic_name)
+                body = body.replace(placeholder, clinic_name)
         else:
             # Default fallback template
             subject = f"Strategic Partnership Inquiry | {clinic_name}"
             body = (
-                f"Dear Administrative Team,\n\n"
+                f"Dear Team,\n\n"
                 f"I hope this message finds you well. I am reaching out to {clinic_name} regarding a collaboration opportunity.\n\n"
-                f"We would love to discuss how we can support your clinic.\n\n"
+                f"We would love to discuss how we can support your business.\n\n"
                 f"Best regards,\nHimanshu Shakya"
             )
             
@@ -479,17 +480,28 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
         
         log(f"[SCRAPER_TASK_QUERY_SETUP] Setting up query variations", "INFO")
         
-        # ── GENERATE 6 FOCUSED HIGH-QUALITY QUERIES ──
-        # Instead of 90+ queries which lead to duplicates and extreme slowness,
-        # we generate 6 high-yield queries.
-        base_queries = [
-            f"{specialization} in {city}",
-            f"{specialization} clinic in {city}",
-            f"{specialization} center in {city}",
-            f"best {specialization} in {city}",
-            f"top rated {specialization} in {city}",
-            f"{specialization} specialist in {city}",
-        ]
+        # Determine if the specialization/category looks like a medical field
+        medical_keywords = ['clinic', 'health', 'dental', 'doctor', 'physio', 'gynae', 'pediatr', 'cardi', 'hospital', 'medical', 'dentist', 'gynaecologist', 'clinics']
+        is_medical = any(w in specialization.lower() for w in medical_keywords)
+        
+        if is_medical:
+            base_queries = [
+                f"{specialization} in {city}",
+                f"{specialization} clinic in {city}",
+                f"{specialization} center in {city}",
+                f"best {specialization} in {city}",
+                f"top rated {specialization} in {city}",
+                f"{specialization} specialist in {city}",
+            ]
+        else:
+            base_queries = [
+                f"{specialization} in {city}",
+                f"{specialization} near {city}",
+                f"best {specialization} in {city}",
+                f"top rated {specialization} in {city}",
+                f"{specialization} companies in {city}",
+                f"{specialization} firms in {city}",
+            ]
         
         query_variations = []
         for q in base_queries:
@@ -660,16 +672,28 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
             log(f"[SCRAPER_TASK_EXPANSION] Only found {len(live_db)} unique clinics. Initiating search expansion...", "INFO")
             add_log(f"⚠️ Search yielded only {len(live_db)} clinics. Triggering dynamic search expansion to meet 100+ target...")
             
-            expansion_queries = [
-                f"{specialization} near {city}",
-                f"{specialization} in {city} surrounding areas",
-                f"{specialization} in {city} region",
-                f"medical clinic in {city}",
-                f"private clinic in {city}",
-                f"doctors in {city}",
-                f"health center in {city}",
-                f"hospital in {city}"
-            ]
+            if is_medical:
+                expansion_queries = [
+                    f"{specialization} near {city}",
+                    f"{specialization} in {city} surrounding areas",
+                    f"{specialization} in {city} region",
+                    f"medical clinic in {city}",
+                    f"private clinic in {city}",
+                    f"doctors in {city}",
+                    f"health center in {city}",
+                    f"hospital in {city}"
+                ]
+            else:
+                expansion_queries = [
+                    f"{specialization} near {city}",
+                    f"{specialization} in {city} surrounding areas",
+                    f"{specialization} in {city} region",
+                    f"top {specialization} in {city}",
+                    f"local {specialization} in {city}",
+                    f"{specialization} services in {city}",
+                    f"best {specialization} services in {city}",
+                    f"top rated {specialization} services in {city}"
+                ]
             if country:
                 expansion_queries = [f"{q}, {country}" for q in expansion_queries]
                 
@@ -1017,8 +1041,8 @@ def generate_protocol():
                             "role": "system",
                             "content": (
                                 "You are a professional B2B outreach copywriter. Your goal is to write a highly effective, "
-                                "professional B2B email template/outreach protocol for a medical clinic. "
-                                "You MUST include '[Clinic Name]' as a placeholder where appropriate. "
+                                "professional B2B email template/outreach protocol for a business. "
+                                "You MUST include '[Business Name]' as a placeholder where appropriate. "
                                 "Keep the output clean: include a 'Subject:' line at the top, and then the email body. "
                                 "Do not output any introductory or concluding conversational text. Return ONLY the template."
                             )
@@ -1049,11 +1073,11 @@ def generate_protocol():
         if not template:
             log("Using local heuristic template generator fallback", "INFO")
             template = (
-                f"Subject: Strategic Partnership Inquiry | [Clinic Name]\n\n"
-                f"Dear Administrative Team,\n\n"
-                f"I hope this message finds you well. I am reaching out to [Clinic Name] regarding a collaboration opportunity in your area.\n\n"
-                f"We have been following your clinic's achievements and are highly impressed by your commitment to patient care. We specialize in solutions for clinics, specifically targeting {prompt}.\n\n"
-                f"We would love to discuss how we can support [Clinic Name] to streamline operations and enhance patient outcomes.\n\n"
+                f"Subject: Strategic Partnership Inquiry | [Business Name]\n\n"
+                f"Dear Team,\n\n"
+                f"I hope this message finds you well. I am reaching out to [Business Name] regarding a collaboration opportunity in your area.\n\n"
+                f"We have been following your achievements and are highly impressed by your commitment to excellence. We specialize in solutions for businesses, specifically targeting {prompt}.\n\n"
+                f"We would love to discuss how we can support [Business Name] to streamline operations and enhance outcomes.\n\n"
                 f"Are you available for a brief 10-minute introductory call next week?\n\n"
                 f"Best regards,\n"
                 f"Himanshu Shakya\n"
@@ -1143,11 +1167,11 @@ def send_test_email():
 
 if __name__ == '__main__':
     log("=" * 60, "OK")
-    log("CLINIC DISCOVERY BACKEND - STARTING UP", "OK")
+    log("LEADFLOW AI BACKEND - STARTING UP", "OK")
     log("=" * 60, "OK")
     log(f"Supabase Connection Url: {'Configured' if SUPABASE_URL else 'Not Configured'}", "INFO")
     log(f"Environment: {os.getenv('ENVIRONMENT', 'development')}", "INFO")
-    log(f"Clinics loaded from disk: {len(live_db)}", "INFO")
+    log(f"Leads loaded from disk: {len(live_db)}", "INFO")
     log("=" * 60, "OK")
 
     try:

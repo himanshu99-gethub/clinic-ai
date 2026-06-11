@@ -21,7 +21,7 @@ const SearchForm = ({ onSearch, isLoading }) => {
   };
 
   const fields = [
-    { key: 'specialization', label: 'Clinical Specialization', placeholder: 'e.g. Dental Clinic', icon: '🩺' },
+    { key: 'specialization', label: 'Business Category / Sector', placeholder: 'e.g. AI, SaaS, Dental', icon: '🔍' },
     { key: 'city', label: 'Target City', placeholder: 'e.g. New York', icon: '🏙️' },
     { key: 'country', label: 'Country / Region', placeholder: 'e.g. USA', icon: '🌍' },
   ];
@@ -36,7 +36,7 @@ const SearchForm = ({ onSearch, isLoading }) => {
             Discovery Unit
           </h2>
           <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginTop: '4px' }}>
-            Initialize healthcare node scanning protocol
+            Initialize targeted B2B lead scanning protocol
           </p>
         </div>
       </div>
