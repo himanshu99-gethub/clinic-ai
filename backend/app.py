@@ -15,6 +15,15 @@ from fill_emails_max import find_email as extract_email_max
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import sys
+
+# Force IPv4 to prevent connection hangs/timeouts on Render due to IPv6
+try:
+    import socket
+    import urllib3.util.connection as urllib3_cn
+    urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
+except Exception:
+    pass
+
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 if hasattr(sys.stderr, 'reconfigure'):

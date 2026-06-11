@@ -31,6 +31,13 @@ import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Force IPv4 to prevent connection hangs/timeouts on Render due to IPv6
+try:
+    import urllib3.util.connection as urllib3_cn
+    urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
+except Exception:
+    pass
+
 # ── Encoding fix ──────────────────────────────────────────────────────────────
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -46,23 +53,27 @@ save_lock    = threading.Lock()
 print_lock   = threading.Lock()
 
 HEADERS = {
-    'User-Agent': (
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/124.0.0.0 Safari/537.36'
-    ),
-    'Accept': 'text/html,application/xhtml+xml,*/*;q=0.9',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Accept-Encoding': 'gzip, deflate',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Referer': 'https://www.google.com/',
+    'DNT': '1',
     'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'cross-site',
+    'Sec-Fetch-User': '?1',
 }
 
 BING_HEADERS = {
-    'User-Agent': (
-        'Mozilla/5.0 (compatible; Bingbot/2.0; +http://www.bing.com/bingbot.htm)'
-    ),
-    'Accept': 'text/html,*/*',
-    'Accept-Language': 'en-US,en;q=0.5',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Referer': 'https://www.bing.com/',
+    'Connection': 'keep-alive',
 }
 
 EMAIL_RE = re.compile(
@@ -218,7 +229,7 @@ def extract_from_html(html: str, site_url: str = '') -> list:
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 def fetch(url: str, timeout=3, headers=None) -> str:
-    """Fetch URL with reduced default timeout for speed."""
+    """Fetch URL with reduced default timeout for speed. Falls back to http if https fails."""
     hdrs = headers or HEADERS
     try:
         r = requests.get(url, headers=hdrs, timeout=timeout,
@@ -227,6 +238,18 @@ def fetch(url: str, timeout=3, headers=None) -> str:
             return r.text
     except Exception:
         pass
+        
+    # Fallback to http if https failed (common for older clinic web hosts)
+    if url.startswith('https://'):
+        http_url = url.replace('https://', 'http://', 1)
+        try:
+            r = requests.get(http_url, headers=hdrs, timeout=timeout,
+                             verify=False, allow_redirects=True)
+            if r.status_code < 400:
+                return r.text
+        except Exception:
+            pass
+            
     return ''
 
 
