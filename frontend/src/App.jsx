@@ -76,7 +76,7 @@ const TemplateEditor = ({ template, onSave }) => {
       alert(res.data.message || 'Test email sent successfully!');
     } catch (e) {
       console.error(e);
-      alert('Failed to send test email: ' + (e.response?.data?.error || e.message));
+      alert('Failed to send test email: ' + getErrorMessage(e));
     } finally {
       setTestingEmail(false);
     }
@@ -171,6 +171,22 @@ const TemplateEditor = ({ template, onSave }) => {
       </div>
     </div>
   );
+};
+
+const getErrorMessage = (e) => {
+  if (!e) return '';
+  if (typeof e === 'string') return e;
+  if (e.response?.data) {
+    const data = e.response.data;
+    if (typeof data.error === 'string') return data.error;
+    if (typeof data.error === 'object' && data.error !== null) {
+      return data.error.message || JSON.stringify(data.error);
+    }
+    if (typeof data.message === 'string') return data.message;
+    if (typeof data === 'string') return data;
+    return JSON.stringify(data);
+  }
+  return e.message || String(e);
 };
 
 // ── Main App ─────────────────────────────────────────────
@@ -282,7 +298,7 @@ export default function App() {
       setTimeout(() => setMessage(''), 12000);
     } catch (e) {
       console.error('[Search Error]', e);
-      setMessage(`❌ ERROR: ${e.response?.data?.error || 'Failed to initiate discovery. Check backend connection.'}`);
+      setMessage(`❌ ERROR: ${getErrorMessage(e) || 'Failed to initiate discovery. Check backend connection.'}`);
       setTimeout(() => setMessage(''), 8000);
     } finally {
       setLoading(false);
@@ -302,7 +318,7 @@ export default function App() {
       setMessage(res.data.message || '✅ GLOBAL OUTREACH PROTOCOL SAVED SUCCESSFULLY');
     } catch (e) {
       console.error('Failed to save template to backend:', e);
-      setMessage('❌ FAILED TO SAVE PROTOCOL TO DATABASE: ' + (e.response?.data?.error || e.message));
+      setMessage('❌ FAILED TO SAVE PROTOCOL TO DATABASE: ' + getErrorMessage(e));
     } finally {
       setTimeout(() => setMessage(''), 5000);
     }
@@ -411,7 +427,7 @@ export default function App() {
       setTimeout(() => setMessage(''), 5000);
     } catch (e) {
       console.error(e);
-      setMessage('❌ Failed to clear database: ' + (e.response?.data?.error || e.message));
+      setMessage('❌ Failed to clear database: ' + getErrorMessage(e));
       setTimeout(() => setMessage(''), 5000);
     }
   };
@@ -518,7 +534,7 @@ export default function App() {
                             setTimeout(() => setMessage(''), 5000);
                           })
                           .catch(e => {
-                            setMessage(`❌ BACKEND ERROR: ${e.message}`);
+                            setMessage(`❌ BACKEND ERROR: ${getErrorMessage(e)}`);
                             setTimeout(() => setMessage(''), 5000);
                           });
                       }}
