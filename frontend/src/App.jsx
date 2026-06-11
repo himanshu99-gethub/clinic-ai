@@ -13,6 +13,9 @@ const getApiUrl = () => {
   if (window.location.port === '5173') {
     return 'http://localhost:8081/api';
   }
+  if (window.location.hostname.endsWith('vercel.app')) {
+    return 'https://clinic-ai-fuc9.onrender.com/api';
+  }
   return '/api';
 };
 const API_BASE_URL = getApiUrl();
