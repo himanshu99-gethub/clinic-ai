@@ -117,20 +117,20 @@ class ClinicScraper:
             links = self.driver.find_elements(By.CLASS_NAME, "hfpxzc")
             log(f"Found {len(links)} clinic links on initial load")
             
-            # Scroll to load more results — cap at 8 iterations, break if we have >= 80 links
+            # Scroll to load more results — cap at 3 iterations, break if we have >= 40 links
             no_new_count = 0
-            for scroll_count in range(8):
+            for scroll_count in range(3):
                 try:
                     self.driver.execute_script("""
                         var results_div = document.querySelector('div[role="feed"]') || document.querySelector('[role="main"]') || document.body;
                         results_div.scrollTop += 3000;
                     """)
-                    time.sleep(0.8)
+                    time.sleep(0.6)
                     new_links = self.driver.find_elements(By.CLASS_NAME, "hfpxzc")
                     log(f"After scroll {scroll_count + 1}: Found {len(new_links)} total links")
                     
-                    if len(new_links) >= 80:
-                        log(f"Found {len(new_links)} links (>= 80). Stopping scrolls early for speed.", "INFO")
+                    if len(new_links) >= 40:
+                        log(f"Found {len(new_links)} links (>= 40). Stopping scrolls early for speed.", "INFO")
                         links = new_links
                         break
                         
@@ -151,8 +151,8 @@ class ClinicScraper:
             last_extracted_name = None
             last_extracted_h1 = None
             
-            # Cap at 120 clinics per query to ensure we can gather enough leads
-            MAX_PER_QUERY = 120
+            # Cap at 40 clinics per query to ensure we can gather enough leads
+            MAX_PER_QUERY = 40
             for i in range(MAX_PER_QUERY):
                 try:
                     # Re-find links dynamically to prevent StaleElementReferenceException
@@ -202,9 +202,9 @@ class ClinicScraper:
                             overlap = set(n1_filtered).intersection(set(n2_filtered))
                             return len(overlap) > 0
 
-                        while time.time() - start_time < 2.0:
-                            # Retry JS click if 0.7 seconds pass without panel loaded
-                            if not click_retried and (time.time() - start_time > 0.7):
+                        while time.time() - start_time < 1.0:
+                            # Retry JS click if 0.4 seconds pass without panel loaded
+                            if not click_retried and (time.time() - start_time > 0.4):
                                 try:
                                     self.driver.execute_script("arguments[0].click();", link)
                                     click_retried = True
@@ -237,7 +237,7 @@ class ClinicScraper:
                                     break
                             except:
                                 pass
-                            time.sleep(0.15)
+                            time.sleep(0.1)
                                 
                     except Exception as click_err:
                         log(f"Error clicking clinic link: {str(click_err)}", "WARNING")

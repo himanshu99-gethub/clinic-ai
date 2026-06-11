@@ -499,20 +499,12 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
         if is_medical:
             base_queries = [
                 f"{specialization} in {city}",
-                f"{specialization} clinic in {city}",
-                f"{specialization} center in {city}",
                 f"best {specialization} in {city}",
-                f"top rated {specialization} in {city}",
-                f"{specialization} specialist in {city}",
             ]
         else:
             base_queries = [
                 f"{specialization} in {city}",
-                f"{specialization} near {city}",
                 f"best {specialization} in {city}",
-                f"top rated {specialization} in {city}",
-                f"{specialization} companies in {city}",
-                f"{specialization} firms in {city}",
             ]
         
         query_variations = []
@@ -537,11 +529,11 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
         results = []
         # Populate seen_names from memory (live_db) to avoid scraping duplicates in subsequent runs or queries
         seen_names = {c["name"].strip().lower() for c in live_db if c.get("name")}
-        TARGET_CLINICS = 200  # Target: 200 unique clinics
+        TARGET_CLINICS = 50  # Target: 50 unique clinics
         
-        # ThreadPoolExecutor for background extraction. We run up to 20 workers.
+        # ThreadPoolExecutor for background extraction. We run up to 5 workers.
         # Started here so we can submit tasks dynamically.
-        extraction_executor = ThreadPoolExecutor(max_workers=20)
+        extraction_executor = ThreadPoolExecutor(max_workers=5)
         extraction_futures = []
         verified_count = 0
         real_count = 0
@@ -688,23 +680,11 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                 expansion_queries = [
                     f"{specialization} near {city}",
                     f"{specialization} in {city} surrounding areas",
-                    f"{specialization} in {city} region",
-                    f"medical clinic in {city}",
-                    f"private clinic in {city}",
-                    f"doctors in {city}",
-                    f"health center in {city}",
-                    f"hospital in {city}"
                 ]
             else:
                 expansion_queries = [
                     f"{specialization} near {city}",
                     f"{specialization} in {city} surrounding areas",
-                    f"{specialization} in {city} region",
-                    f"top {specialization} in {city}",
-                    f"local {specialization} in {city}",
-                    f"{specialization} services in {city}",
-                    f"best {specialization} services in {city}",
-                    f"top rated {specialization} services in {city}"
                 ]
             if country:
                 expansion_queries = [f"{q}, {country}" for q in expansion_queries]
