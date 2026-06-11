@@ -549,7 +549,7 @@ def method_construct(clinic_name: str, domain: str) -> str:
 
 # ── Per-clinic orchestration ──────────────────────────────────────────────────
 
-def find_email(clinic: dict) -> str:
+def find_email(clinic: dict, fast_mode=True) -> str:
     name    = clinic.get('name', '')
     website = (clinic.get('website') or '').strip()
     city    = clinic.get('city', '')
@@ -604,6 +604,15 @@ def find_email(clinic: dict) -> str:
         if email:
             log(f"  -> [M2] FOUND: {email}")
             return email
+
+    if fast_mode:
+        # In fast mode (web app), skip M3 deep crawl and M4-M6 search engines to keep search responsive
+        # and prevent datacenter IP blocks on Render. We fall back directly to construction M8.
+        email = method_construct(name, domain)
+        if email:
+            log(f"  -> [M8-Construct] FOUND: {email}")
+            return email
+        return ''
 
     # ── M3: Deep crawl ───────────────────────────────────────────────────────
     if website and homepage_html:
@@ -670,7 +679,7 @@ def main():
         log(f"\n[{idx+1}/{total}] {name}")
         log(f"         website: {clinic.get('website', 'NO WEBSITE')}")
 
-        email = find_email(clinic)
+        email = find_email(clinic, fast_mode=False)
 
         with counters_lock:
             done_count += 1

@@ -485,10 +485,10 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
     scraper = None
     try:
         log(f"[SCRAPER_TASK_LOCK] Acquiring scraper lock...", "INFO")
-        with scraper_lock:
-            log(f"[SCRAPER_TASK_INIT] Creating ClinicScraper instance...", "INFO")
-            scraper = ClinicScraper()
-            log(f"[SCRAPER_TASK_CREATED] ClinicScraper instance created successfully", "OK")
+        scraper_lock.acquire()
+        log(f"[SCRAPER_TASK_INIT] Creating ClinicScraper instance...", "INFO")
+        scraper = ClinicScraper()
+        log(f"[SCRAPER_TASK_CREATED] ClinicScraper instance created successfully", "OK")
         
         log(f"[SCRAPER_TASK_QUERY_SETUP] Setting up query variations", "INFO")
         
@@ -713,6 +713,20 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                     add_log(f"Expansion Query {idx_exp+1} failed: {str(query_err)}", "WARNING")
 
         
+        # Close Selenium browser and release lock immediately to free up resources
+        if scraper:
+            try:
+                log(f"[SCRAPER_TASK_CLEANUP] Closing scraper browser...", "INFO")
+                scraper.close()
+                scraper = None
+                log("Scraper browser closed", "OK")
+            except Exception as e:
+                log(f"Error closing scraper: {str(e)}", "WARNING")
+        
+        if scraper_lock.locked():
+            scraper_lock.release()
+            log(f"[SCRAPER_TASK_LOCK] Released scraper lock", "INFO")
+            
         if not results:
             log(f"[SCRAPER_TASK_NO_RESULTS] No clinics found matching criteria", "WARNING")
             add_log("❌ No clinics found matching criteria", "WARNING")
@@ -739,11 +753,14 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
     finally:
         if scraper:
             try:
-                log(f"[SCRAPER_TASK_CLEANUP] Closing scraper", "INFO")
+                log(f"[SCRAPER_TASK_CLEANUP] Closing scraper browser in finally...", "INFO")
                 scraper.close()
-                log("Scraper closed", "OK")
+                log("Scraper browser closed", "OK")
             except Exception as e:
                 log(f"Error closing scraper: {str(e)}", "WARNING")
+        if scraper_lock.locked():
+            scraper_lock.release()
+            log(f"[SCRAPER_TASK_LOCK] Released scraper lock in finally", "INFO")
 
 # ────────────────────────────────────────────────────────────
 # API ENDPOINTS
