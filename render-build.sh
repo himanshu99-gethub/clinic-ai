@@ -22,7 +22,7 @@ fi
 
 # Install Python requirements
 echo "...Installing Python dependencies"
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 
 # Frontend files are pre-built and committed to Git under frontend/dist, so no npm build is required on Render.
 
