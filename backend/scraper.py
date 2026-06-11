@@ -34,15 +34,23 @@ class ClinicScraper:
         try:
             options = Options()
             options.add_argument("--headless")
-            options.add_argument("--disable-gpu")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--lang=en-US")
+            options.add_argument("--disable-gpu")
             options.add_argument("--disable-blink-features=AutomationControlled")
             options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
             options.add_argument("--log-level=3")
             options.add_argument("--disable-extensions")
             options.add_argument("--window-size=1920,1080")
             options.add_argument("--start-maximized")
+            
+            # Disable image loading to save massive CPU and network bandwidth on Render
+            prefs = {
+                "profile.managed_default_content_settings.images": 2,
+                "profile.default_content_setting_values.images": 2
+            }
+            options.add_experimental_option("prefs", prefs)
             
             # Eager page load strategy so Selenium doesn't wait for heavy map assets/tiles
             options.page_load_strategy = 'eager'
@@ -84,7 +92,7 @@ class ClinicScraper:
         results = []
         
         try:
-            url = f"https://www.google.com/maps/search/{urllib.parse.quote(query)}"
+            url = f"https://www.google.com/maps/search/{urllib.parse.quote(query)}?hl=en"
             log(f"Navigating to: {url}")
             self.driver.get(url)
             
@@ -202,9 +210,9 @@ class ClinicScraper:
                             overlap = set(n1_filtered).intersection(set(n2_filtered))
                             return len(overlap) > 0
 
-                        while time.time() - start_time < 1.0:
-                            # Retry JS click if 0.4 seconds pass without panel loaded
-                            if not click_retried and (time.time() - start_time > 0.4):
+                        while time.time() - start_time < 2.5:
+                            # Retry JS click if 0.8 seconds pass without panel loaded
+                            if not click_retried and (time.time() - start_time > 0.8):
                                 try:
                                     self.driver.execute_script("arguments[0].click();", link)
                                     click_retried = True
@@ -838,29 +846,40 @@ class ClinicScraper:
         """Handle Google's cookie consent redirect or popup if it appears."""
         try:
             current_url = self.driver.current_url
+            accept_phrases = [
+                'accept all', 'accept', 'agree', 'i agree',
+                'alle akzeptieren', 'akzeptieren', 'zustimmen', 'ich stimme zu',
+                'tout accepter', 'accepter', "j'accepte",
+                'aceptar todo', 'aceptar', 'acepto',
+                'accetta tutto', 'accetta', 'accetto',
+                'alles accepteren', 'accepteren', 'akkoord'
+            ]
+            
             if "consent.google" in current_url:
                 log("Redirected to Google Consent page. Attempting to accept...", "INFO")
-                # Find buttons on Google consent page
                 buttons = self.driver.find_elements(By.XPATH, "//button")
                 for btn in buttons:
                     txt = btn.text.strip().lower()
-                    if 'accept' in txt or 'agree' in txt or 'tout accepter' in txt or 'accept all' in txt:
+                    if any(phrase in txt for phrase in accept_phrases):
                         self.driver.execute_script("arguments[0].click();", btn)
-                        log("Consent page accepted.", "OK")
+                        log(f"Consent page accepted via button: {btn.text}", "OK")
                         time.sleep(2)
-                        break
+                        return
             else:
-                # Check for consent buttons on the page itself
-                consent_buttons = self.driver.find_elements(By.XPATH, 
-                    "//button[contains(text(), 'Accept all') or contains(text(), 'Agree') or contains(@aria-label, 'Accept')]"
-                )
-                if consent_buttons:
-                    for btn in consent_buttons:
+                # Check for consent popups on the page itself
+                buttons = self.driver.find_elements(By.TAG_NAME, "button")
+                for btn in buttons:
+                    try:
                         if btn.is_displayed():
-                            self.driver.execute_script("arguments[0].click();", btn)
-                            log("Cookie consent dialog accepted.", "OK")
-                            time.sleep(1)
-                            break
+                            txt = btn.text.strip().lower()
+                            aria = (btn.get_attribute("aria-label") or "").strip().lower()
+                            if any(phrase in txt for phrase in accept_phrases) or any(phrase in aria for phrase in accept_phrases):
+                                self.driver.execute_script("arguments[0].click();", btn)
+                                log(f"Cookie consent dialog accepted via button: {btn.text or aria}", "OK")
+                                time.sleep(1)
+                                return
+                    except:
+                        pass
         except Exception as e:
             log(f"Error handling cookie consent: {e}", "WARNING")
 
