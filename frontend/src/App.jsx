@@ -198,6 +198,13 @@ export default function App() {
   const [message, setMessage] = useState('');
   const [activeFilter, setActiveFilter] = useState(null);
   const [sending, setSending] = useState(false);
+  const [isVercelMisconfigured, setIsVercelMisconfigured] = useState(false);
+
+  useEffect(() => {
+    if (window.location.hostname.endsWith('vercel.app') && API_BASE_URL === '/api') {
+      setIsVercelMisconfigured(true);
+    }
+  }, []);
 
   // Safety net: loading can NEVER be stuck for more than 15 seconds
   useEffect(() => {
@@ -490,6 +497,32 @@ export default function App() {
               </p>
             </div>
           </div>
+
+          {isVercelMisconfigured && (
+            <div className="glass-panel" style={{
+              padding: '20px 32px',
+              marginBottom: '32px',
+              background: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              color: '#ffb4ab',
+              borderRadius: '12px'
+            }}>
+              <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px', color: '#ffb4ab' }}>
+                ⚠️ Vercel Connection Setup Required
+              </h4>
+              <p style={{ margin: '10px 0 0 0', fontSize: '12px', lineHeight: '1.6', color: 'rgba(255,255,255,0.7)', textTransform: 'none', letterSpacing: 'normal' }}>
+                You are accessing LeadFlow AI on Vercel, but the frontend is trying to query the Vercel server instead of your Render backend.
+              </p>
+              <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px', fontSize: '11.5px', lineHeight: '1.6', color: 'rgba(255,255,255,0.8)', textTransform: 'none', letterSpacing: 'normal' }}>
+                <li>
+                  <strong>Option A (Recommended)</strong>: Open the app directly using your <strong>Render URL</strong> (e.g. <code>https://your-service.onrender.com</code>). Render hosts both the backend and frontend together, so it works perfectly.
+                </li>
+                <li style={{ marginTop: '6px' }}>
+                  <strong>Option B</strong>: In your Vercel Dashboard, go to <strong>Project Settings &gt; Environment Variables</strong>, add <code>VITE_API_BASE_URL</code> pointing to your Render API (e.g. <code>https://your-service.onrender.com/api</code>), and redeploy.
+                </li>
+              </ul>
+            </div>
+          )}
 
           {message && (
             <div className="glass-panel" style={{
