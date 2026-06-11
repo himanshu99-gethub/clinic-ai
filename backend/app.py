@@ -469,115 +469,196 @@ def auto_send(clinic, template=None):
         log(f"Outreach Error sending to {clinic.get('email', 'N/A')}: {str(e)}\n{traceback.format_exc()}", "ERROR")
         return False, str(e)
 
+
 # ────────────────────────────────────────────────────────────
-# DUCKDUCKGO FALLBACK SEARCH (requests-based, no Selenium)
+# FAST API-BASED SEARCH (no Selenium — works on Render)
 # ────────────────────────────────────────────────────────────
 
-def run_ddg_fallback_search(query, on_clinic_found, seen_names, city, country, specialization):
+def _search_via_ddg_library(query, max_results=20):
     """
-    Fast DuckDuckGo-based search that uses plain HTTP requests (no Selenium/Chrome).
-    Parses the DuckDuckGo HTML results page to extract business names, websites,
-    phone numbers, and addresses.
-    Returns the number of new clinics found.
+    Use the duckduckgo_search Python library (DDG's real API endpoint, not HTML scraping).
+    Returns list of {title, href, body} dicts.
     """
-    log(f"[DDG] Starting DuckDuckGo fallback search for: {query}", "INFO")
-    add_log(f"🦆 DDG Search: {query}")
-    found_count = 0
-    
     try:
+        from duckduckgo_search import DDGS
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results, region="wt-wt", safesearch="off"):
+                results.append(r)
+        log(f"[DDG_LIB] Got {len(results)} results for: {query}", "INFO")
+        return results
+    except Exception as e:
+        log(f"[DDG_LIB] Failed: {e}", "WARNING")
+        return []
+
+def _search_via_google_cse(query, max_results=10):
+    """
+    Use Google Custom Search API (100 free queries/day).
+    Requires GOOGLE_CSE_KEY and GOOGLE_CSE_ID environment variables.
+    """
+    api_key = os.getenv("GOOGLE_CSE_KEY", "")
+    cse_id  = os.getenv("GOOGLE_CSE_ID", "")
+    if not api_key or not cse_id:
+        return []
+    try:
+        url = "https://www.googleapis.com/customsearch/v1"
+        params = {"key": api_key, "cx": cse_id, "q": query, "num": min(max_results, 10)}
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+        results = [{"title": i.get("title", ""), "href": i.get("link", ""), "body": i.get("snippet", "")} for i in items]
+        log(f"[GCSE] Got {len(results)} results for: {query}", "INFO")
+        return results
+    except Exception as e:
+        log(f"[GCSE] Failed: {e}", "WARNING")
+        return []
+
+def _search_via_bing(query, max_results=10):
+    """
+    Use Bing Web Search API (free tier: 1000 queries/month).
+    Requires BING_SEARCH_KEY environment variable.
+    """
+    api_key = os.getenv("BING_SEARCH_KEY", "")
+    if not api_key:
+        return []
+    try:
+        url = "https://api.bing.microsoft.com/v7.0/search"
+        headers = {"Ocp-Apim-Subscription-Key": api_key}
+        params = {"q": query, "count": max_results, "responseFilter": "Webpages"}
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+        pages = resp.json().get("webPages", {}).get("value", [])
+        results = [{"title": p.get("name", ""), "href": p.get("url", ""), "body": p.get("snippet", "")} for p in pages]
+        log(f"[BING] Got {len(results)} results for: {query}", "INFO")
+        return results
+    except Exception as e:
+        log(f"[BING] Failed: {e}", "WARNING")
+        return []
+
+def _search_via_ddg_html(query, max_results=15):
+    """
+    Fallback: DuckDuckGo HTML scraping (may be blocked on datacenter IPs).
+    """
+    try:
+        import re as _re
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
-        
-        # Use DuckDuckGo HTML (no JS required)
         encoded_query = urllib.parse.quote_plus(query)
-        url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
-        
-        log(f"[DDG] Fetching: {url}", "INFO")
-        resp = requests.get(url, headers=headers, timeout=20)
+        resp = requests.get(f"https://html.duckduckgo.com/html/?q={encoded_query}", headers=headers, timeout=15)
         resp.raise_for_status()
-        
         soup = BeautifulSoup(resp.text, "html.parser")
-        
-        # DDG HTML results are in .result blocks
-        results = soup.find_all("div", class_="result")
-        log(f"[DDG] Found {len(results)} raw result blocks", "INFO")
-        
-        for result in results:
-            try:
-                # Extract title (business name)
-                title_tag = result.find("a", class_="result__a")
-                if not title_tag:
-                    continue
-                name = title_tag.get_text(strip=True)
-                if not name or len(name) < 3:
-                    continue
-                    
-                # Skip obvious non-business results (Wikipedia, directories, ads)
-                skip_domains = ["wikipedia.org", "facebook.com", "instagram.com", "twitter.com",
-                               "linkedin.com", "yelp.com", "tripadvisor.com", "yellowpages.com",
-                               "healthgrades.com", "zocdoc.com", "webmd.com", "mayo", "nhs.uk",
-                               "practo.com", "justdial.com", "sulekha.com", "google.com"]
-                href = title_tag.get("href", "")
-                
-                # DDG wraps links through redirect, try to extract real URL
-                website = ""
-                if "uddg=" in href:
-                    try:
-                        parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
-                        website = urllib.parse.unquote(parsed.get("uddg", [""])[0])
-                    except Exception:
-                        website = ""
-                elif href.startswith("http"):
-                    website = href
-                
-                if any(skip in website.lower() for skip in skip_domains):
-                    continue
-                
-                # Extract snippet for address / phone hints
-                snippet_tag = result.find("a", class_="result__snippet") or result.find("div", class_="result__snippet")
-                snippet = snippet_tag.get_text(" ", strip=True) if snippet_tag else ""
-                
-                # Basic phone extraction from snippet
-                import re
-                phone_match = re.search(r"[\+]?[\d][\d\s\-\.\(\)]{7,15}\d", snippet)
-                phone = phone_match.group(0).strip() if phone_match else ""
-                
-                name_lower = name.strip().lower()
-                if name_lower in seen_names:
-                    continue
-                
-                clinic_candidate = {
-                    "name": name,
-                    "website": website,
-                    "phone": phone,
-                    "address": snippet[:200] if snippet else "",
-                }
-                
-                log(f"[DDG] Candidate clinic: {name} | {website}", "INFO")
-                on_clinic_found(clinic_candidate)
-                found_count += 1
-                
-            except Exception as parse_err:
-                log(f"[DDG] Error parsing result: {parse_err}", "WARNING")
+        blocks = soup.find_all("div", class_="result")
+        results = []
+        for block in blocks[:max_results]:
+            a = block.find("a", class_="result__a")
+            s = block.find("a", class_="result__snippet") or block.find("div", class_="result__snippet")
+            if not a:
                 continue
-                
-    except requests.exceptions.Timeout:
-        log(f"[DDG] Request timed out for query: {query}", "WARNING")
-        add_log(f"⚠️ DDG search timed out for: {query}")
+            href = a.get("href", "")
+            if "uddg=" in href:
+                try:
+                    parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                    href = urllib.parse.unquote(parsed.get("uddg", [""])[0])
+                except Exception:
+                    pass
+            results.append({"title": a.get_text(strip=True), "href": href, "body": s.get_text(" ", strip=True) if s else ""})
+        log(f"[DDG_HTML] Got {len(results)} results for: {query}", "INFO")
+        return results
     except Exception as e:
-        log(f"[DDG] Search failed: {str(e)}", "WARNING")
-        add_log(f"⚠️ DDG search failed: {str(e)}")
-        
-    log(f"[DDG] Found {found_count} new clinics for query: {query}", "INFO")
-    return found_count
+        log(f"[DDG_HTML] Failed: {e}", "WARNING")
+        return []
 
+
+def run_ddg_fallback_search(query, on_clinic_found, seen_names, city, country, specialization):
+    """
+    Multi-source fast search (no Selenium/Chrome). Tries sources in priority order:
+      1. duckduckgo_search library (DDG real API)
+      2. Google Custom Search API (needs GOOGLE_CSE_KEY + GOOGLE_CSE_ID)
+      3. Bing Web Search API (needs BING_SEARCH_KEY)
+      4. DuckDuckGo HTML scraping (last resort)
+    Returns number of new clinics found.
+    """
+    import re
+    log(f"[FAST_SEARCH] Starting for: {query}", "INFO")
+    add_log(f"⚡ Fast API Search: {query}")
+    
+    skip_domains = [
+        "wikipedia.org", "facebook.com", "instagram.com", "twitter.com",
+        "linkedin.com", "yelp.com", "tripadvisor.com", "yellowpages.com",
+        "healthgrades.com", "zocdoc.com", "webmd.com", "nhs.uk",
+        "practo.com", "justdial.com", "sulekha.com", "google.com",
+        "maps.google.com", "youtube.com", "reddit.com", "quora.com"
+    ]
+    
+    # Try sources in order until we get results
+    raw_results = []
+    source_used = None
+    
+    for source_name, source_fn in [
+        ("DDG Library",  lambda: _search_via_ddg_library(query)),
+        ("Google CSE",   lambda: _search_via_google_cse(query)),
+        ("Bing Search",  lambda: _search_via_bing(query)),
+        ("DDG HTML",     lambda: _search_via_ddg_html(query)),
+    ]:
+        raw_results = source_fn()
+        if raw_results:
+            source_used = source_name
+            add_log(f"✅ {source_name} returned {len(raw_results)} results")
+            break
+        else:
+            log(f"[FAST_SEARCH] {source_name} returned 0 — trying next source", "WARNING")
+    
+    if not raw_results:
+        log(f"[FAST_SEARCH] All sources returned 0 for: {query}", "WARNING")
+        add_log(f"⚠️ All search sources returned 0 results for: {query}")
+        return 0
+    
+    log(f"[FAST_SEARCH] Processing {len(raw_results)} results from {source_used}", "INFO")
+    found_count = 0
+    
+    for r in raw_results:
+        try:
+            name    = r.get("title", "").strip()
+            website = r.get("href", "").strip()
+            snippet = r.get("body", "").strip()
+            
+            if not name or len(name) < 3:
+                continue
+            if any(skip in website.lower() for skip in skip_domains):
+                continue
+            
+            name_lower = name.lower()
+            if name_lower in seen_names:
+                continue
+            
+            # Extract phone from snippet
+            phone_match = re.search(r"[\+]?[\d][\d\s\-\.\(\)]{7,15}\d", snippet)
+            phone = phone_match.group(0).strip() if phone_match else ""
+            
+            clinic_candidate = {
+                "name": name,
+                "website": website,
+                "phone": phone,
+                "address": snippet[:200] if snippet else "",
+            }
+            
+            log(f"[FAST_SEARCH] Clinic: {name} | {website}", "INFO")
+            on_clinic_found(clinic_candidate)
+            found_count += 1
+            
+        except Exception as parse_err:
+            log(f"[FAST_SEARCH] Error processing result: {parse_err}", "WARNING")
+            continue
+    
+    log(f"[FAST_SEARCH] Found {found_count} new clinics for: {query}", "INFO")
+    return found_count
 
 # ────────────────────────────────────────────────────────────
 # SCRAPER TASK
 # ────────────────────────────────────────────────────────────
+
 
 def run_scraper_task(city, country, specialization, auto_outreach, template=""):
     """Main scraper orchestration function."""
