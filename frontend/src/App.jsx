@@ -442,6 +442,35 @@ export default function App() {
     }
   };
 
+  const handleDeleteClinic = async (clinic) => {
+    try {
+      const res = await axios.delete(`${API_BASE_URL}/clinics`, {
+        params: { name: clinic.name, city: clinic.city }
+      });
+      setMessage(`🗑️ ${res.data.message || 'Clinic deleted successfully.'}`);
+      setClinics(prev => prev.filter(c => !(c.name === clinic.name && c.city === clinic.city)));
+      
+      // Update stats locally
+      setStats(prev => {
+        const wasVerified = clinic.status === 'Verified';
+        const wasContacted = clinic.outreach_status === 'Contacted';
+        return {
+          ...prev,
+          total: Math.max(0, prev.total - 1),
+          verified: wasVerified ? Math.max(0, prev.verified - 1) : prev.verified,
+          unverified: !wasVerified ? Math.max(0, prev.unverified - 1) : prev.unverified,
+          contacted: wasContacted ? Math.max(0, prev.contacted - 1) : prev.contacted,
+          pending: !wasContacted && clinic.email ? Math.max(0, prev.pending - 1) : prev.pending
+        };
+      });
+      setTimeout(() => setMessage(''), 5000);
+    } catch (e) {
+      console.error(e);
+      setMessage('❌ Failed to delete clinic: ' + getErrorMessage(e));
+      setTimeout(() => setMessage(''), 5000);
+    }
+  };
+
   const statsData = [
     { title: 'Total Leads', value: stats.total, icon: '🏢', color: 'blue' },
     { title: 'Leads Verified', value: stats.verified, icon: '✅', color: 'blue' },
@@ -599,6 +628,7 @@ export default function App() {
                 onOutreach={handleOutreach}
                 isSending={sending}
                 onClearAll={handleClearAll}
+                onDelete={handleDeleteClinic}
               />
             </>
           )}
@@ -670,6 +700,7 @@ export default function App() {
                     onOutreach={handleOutreach}
                     isSending={sending}
                     onClearAll={handleClearAll}
+                    onDelete={handleDeleteClinic}
                   />
                 </div>
               </div>

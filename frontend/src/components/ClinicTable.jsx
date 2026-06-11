@@ -32,7 +32,7 @@ const outreachBadge = (status) => {
   );
 };
 
-const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach, isSending, onClearAll }) => {
+const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach, isSending, onClearAll, onDelete }) => {
   const [filter, setFilter] = React.useState('All');
 
   const filteredClinics = clinics.filter(c => {
@@ -207,17 +207,36 @@ const ClinicTable = ({ clinics, onExport, onAnalyze, onOutreach, isSending, onCl
                     <td style={{ padding: '18px 20px' }}>{statusBadge(clinic.status)}</td>
                     <td style={{ padding: '18px 20px' }}>{outreachBadge(clinic.outreach_status)}</td>
                     <td style={{ padding: '18px 20px', textAlign: 'right' }}>
-                      <button 
-                        onClick={() => onAnalyze(clinic)}
-                        style={{
-                          padding: '7px 16px', background: 'rgba(46,119,174,0.15)',
-                          border: '1px solid rgba(46,119,174,0.3)', borderRadius: '10px',
-                          color: '#4a9fd4', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
-                          fontFamily: 'inherit', transition: 'all 0.2s'
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.background = '#2E77AE'; e.currentTarget.style.color = '#fff'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(46,119,174,0.15)'; e.currentTarget.style.color = '#4a9fd4'; }}
-                      >Analyze →</button>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                        <button 
+                          onClick={() => onAnalyze(clinic)}
+                          style={{
+                            padding: '7px 16px', background: 'rgba(46,119,174,0.15)',
+                            border: '1px solid rgba(46,119,174,0.3)', borderRadius: '10px',
+                            color: '#4a9fd4', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                            fontFamily: 'inherit', transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = '#2E77AE'; e.currentTarget.style.color = '#fff'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(46,119,174,0.15)'; e.currentTarget.style.color = '#4a9fd4'; }}
+                        >Analyze →</button>
+                        {onDelete && (
+                          <button 
+                            onClick={() => {
+                              if (window.confirm(`Are you sure you want to delete ${clinic.name}?`)) {
+                                onDelete(clinic);
+                              }
+                            }}
+                            style={{
+                              padding: '7px 12px', background: 'rgba(239,68,68,0.1)',
+                              border: '1px solid rgba(239,68,68,0.3)', borderRadius: '10px',
+                              color: '#ff8b8b', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                              fontFamily: 'inherit', transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#ef4444'; e.currentTarget.style.color = '#fff'; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.1)'; e.currentTarget.style.color = '#ff8b8b'; }}
+                          >🗑️</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -90,7 +90,7 @@ def supabase_get(table, params=None):
         log(f"Supabase GET error: {e}", "WARNING")
         return None
 
-def supabase_upsert(table, data):
+def supabase_upsert(table, data, on_conflict=None):
     """Upsert rows into a Supabase table."""
     if not supabase_connected:
         return False
@@ -98,7 +98,10 @@ def supabase_upsert(table, data):
         url = f"{SUPABASE_URL}/rest/v1/{table}"
         headers = get_supabase_headers()
         headers["Prefer"] = "resolution=merge-duplicates"
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        params = {}
+        if on_conflict:
+            params["on_conflict"] = on_conflict
+        response = requests.post(url, headers=headers, json=data, params=params, timeout=10)
         if response.status_code in [200, 201]:
             return True
         else:
@@ -612,7 +615,7 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
                         "outreach_status": clinic_ref.get("outreach_status"),
                         "discovery_date": clinic_ref.get("discovery_date")
                     }
-                    success = supabase_upsert("clinics", [clinic_payload])
+                    success = supabase_upsert("clinics", [clinic_payload], on_conflict="name,city")
                     if success:
                         log(f"[PROCESS_SUPABASE_SAVED] Saved to Supabase clinics table", "INFO")
                 
@@ -896,24 +899,36 @@ def get_clinics():
 
 @app.route('/api/clinics', methods=['DELETE'])
 def clear_all_clinics():
-    """Clear all clinics from database and memory file."""
+    """Clear all clinics or delete a specific clinic from database and memory file."""
     global live_db
     try:
-        # Clear Supabase table
-        if supabase_connected:
-            success = supabase_delete("clinics", {"id": "gt.0"})
-            if success:
-                log("✓ Cleared all clinics from Supabase", "OK")
+        name = request.args.get('name', '').strip()
+        city = request.args.get('city', '').strip()
+
+        if name and city:
+            # Delete single clinic
+            if supabase_connected:
+                success = supabase_delete("clinics", {"name": f"eq.{name}", "city": f"eq.{city}"})
+                if success:
+                    log(f"✓ Deleted clinic '{name}' from Supabase", "OK")
             
-        # Clear memory db
-        live_db = []
-        save_data()
-        log("✓ Cleared all clinics from memory and file storage", "OK")
-        
-        # Add entry to logs
-        add_log("🗑️ Database Cleared: All clinical leads deleted by administrator.")
-        
-        return jsonify({"message": "All clinical leads successfully deleted."}), 200
+            live_db = [c for c in live_db if not (c.get('name') == name and c.get('city') == city)]
+            save_data()
+            log(f"✓ Deleted clinic '{name}' from memory and file storage", "OK")
+            add_log(f"🗑️ Clinic Deleted: '{name}' was deleted by administrator.")
+            return jsonify({"message": f"Clinic '{name}' successfully deleted."}), 200
+        else:
+            # Clear all clinics
+            if supabase_connected:
+                success = supabase_delete("clinics", {"id": "not.is.null"})
+                if success:
+                    log("✓ Cleared all clinics from Supabase", "OK")
+                
+            live_db = []
+            save_data()
+            log("✓ Cleared all clinics from memory and file storage", "OK")
+            add_log("🗑️ Database Cleared: All clinical leads deleted by administrator.")
+            return jsonify({"message": "All clinical leads successfully deleted."}), 200
         
     except Exception as e:
         log(f"Error clearing clinics: {str(e)}", "ERROR")
@@ -998,7 +1013,7 @@ def trigger_outreach():
                     if success:
                         contacted += 1
                         if supabase_connected:
-                            supabase_upsert("clinics", [{"name": clinic_name, "city": clinic.get("city"), "outreach_status": "Contacted"}])
+                            supabase_upsert("clinics", [{"name": clinic_name, "city": clinic.get("city"), "outreach_status": "Contacted"}], on_conflict="name,city")
                         # Also update memory live_db state for real-time tracking
                         for c in live_db:
                             if c['name'] == clinic_name:
