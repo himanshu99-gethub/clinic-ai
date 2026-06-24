@@ -28,6 +28,8 @@ import urllib.parse
 import urllib3
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -51,6 +53,30 @@ DATA_FILE    = os.path.join(os.path.dirname(__file__), 'clinics_data.json')
 MAX_WORKERS  = 20
 save_lock    = threading.Lock()
 print_lock   = threading.Lock()
+
+# ── Per-thread persistent session ─────────────────────────────────────────────
+# Each worker thread gets its own requests.Session that reuses TCP connections
+# across all fetch() calls — this is what actually honours Connection: keep-alive.
+_thread_local = threading.local()
+
+def _get_session() -> requests.Session:
+    """Return (or lazily create) a persistent Session for the current thread."""
+    if not hasattr(_thread_local, 'session'):
+        session = requests.Session()
+        session.headers.update(HEADERS)
+        # Retry on transient errors: 429, 500, 502, 503, 504
+        retry = Retry(
+            total=2,
+            backoff_factor=0.3,
+            status_forcelist={429, 500, 502, 503, 504},
+            allowed_methods={"GET", "HEAD"},
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry, pool_connections=4, pool_maxsize=10)
+        session.mount('https://', adapter)
+        session.mount('http://', adapter)
+        _thread_local.session = session
+    return _thread_local.session
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -228,28 +254,50 @@ def extract_from_html(html: str, site_url: str = '') -> list:
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
 
+_BLOCK_SIGNALS = [
+    'captcha', 'robot', 'unusual traffic', 'access denied',
+    'blocked', 'cloudflare', 'enable javascript', 'you have been blocked',
+]
+
+def _is_block_page(text: str, status: int) -> bool:
+    """Detect silent blocks: 403/429 or CAPTCHA/bot-wall pages."""
+    if status in (403, 429):
+        return True
+    snippet = text[:2000].lower()
+    return any(sig in snippet for sig in _BLOCK_SIGNALS)
+
+
 def fetch(url: str, timeout=3, headers=None) -> str:
-    """Fetch URL with reduced default timeout for speed. Falls back to http if https fails."""
-    hdrs = headers or HEADERS
+    """
+    Fetch URL using the thread-local persistent Session (keeps TCP connections
+    alive across calls). Falls back to http:// if https fails.
+    """
+    session = _get_session()
+    # Allow per-call header override (e.g. BING_HEADERS) without mutating the session
+    req_headers = headers if headers else None
     try:
-        r = requests.get(url, headers=hdrs, timeout=timeout,
-                         verify=False, allow_redirects=True)
-        if r.status_code < 400:
+        r = session.get(url, headers=req_headers, timeout=timeout,
+                        verify=False, allow_redirects=True)
+        if r.status_code < 400 and not _is_block_page(r.text, r.status_code):
             return r.text
+        if _is_block_page(r.text, r.status_code):
+            log(f"    [BLOCK] {url} → {r.status_code}")
     except Exception:
         pass
-        
-    # Fallback to http if https failed (common for older clinic web hosts)
+
+    # Fallback to http:// if https failed (common for older clinic web hosts)
     if url.startswith('https://'):
         http_url = url.replace('https://', 'http://', 1)
         try:
-            r = requests.get(http_url, headers=hdrs, timeout=timeout,
-                             verify=False, allow_redirects=True)
-            if r.status_code < 400:
+            r = session.get(http_url, headers=req_headers, timeout=timeout,
+                            verify=False, allow_redirects=True)
+            if r.status_code < 400 and not _is_block_page(r.text, r.status_code):
                 return r.text
+            if _is_block_page(r.text, r.status_code):
+                log(f"    [BLOCK-HTTP] {http_url} → {r.status_code}")
         except Exception:
             pass
-            
+
     return ''
 
 
@@ -292,7 +340,7 @@ def fetch_sub_urls(homepage_url: str, html: str, max_urls=4) -> list:
         # Remove homepage itself
         found.discard(homepage_url.rstrip('/'))
         found.discard(homepage_url.rstrip('/') + '/')
-        return list(found)[:max_urls]
+        return list(found)[:3]
     except Exception:
         return []
 
@@ -328,7 +376,7 @@ def method_homepage(website: str) -> tuple:
     """M1: Scan homepage HTML."""
     if not website:
         return '', ''
-    html = fetch(website, timeout=2)
+    html = fetch(website, timeout=1.5)
     if html:
         ranked = extract_from_html(html, website)
         if ranked:
@@ -346,7 +394,7 @@ def method_subpages(website: str, homepage_html: str) -> str:
     
     def check_url(url):
         try:
-            html = fetch(url, timeout=2)
+            html = fetch(url, timeout=1.5)
             if html:
                 ranked = extract_from_html(html, website)
                 if ranked:
@@ -355,13 +403,19 @@ def method_subpages(website: str, homepage_html: str) -> str:
             pass
         return None
 
-    with ThreadPoolExecutor(max_workers=min(len(sub_urls), 4)) as executor:
-        futures = {executor.submit(check_url, url): url for url in sub_urls}
-        for future in as_completed(futures, timeout=4):
-            res = future.result()
-            if res:
-                log(f"    [M2-SUB-PARALLEL] Found: {res}")
-                return res
+    try:
+        with ThreadPoolExecutor(max_workers=min(len(sub_urls), 3)) as executor:
+            futures = {executor.submit(check_url, url): url for url in sub_urls}
+            for future in as_completed(futures, timeout=5):
+                try:
+                    res = future.result(timeout=2)
+                    if res:
+                        log(f"    [M2-SUB-PARALLEL] Found: {res}")
+                        return res
+                except Exception:
+                    pass
+    except Exception:
+        pass
     return ''
 
 
@@ -369,13 +423,13 @@ def method_deep_crawl(website: str, homepage_html: str) -> str:
     """M3: Crawl internal links (depth-1) in parallel."""
     if not website or not homepage_html:
         return ''
-    all_links = fetch_all_internal_links(website, homepage_html, max_urls=5)
+    all_links = fetch_all_internal_links(website, homepage_html, max_urls=3)
     if not all_links:
         return ''
     
     def check_url(url):
         try:
-            html = fetch(url, timeout=2)
+            html = fetch(url, timeout=1.5)
             if html:
                 ranked = extract_from_html(html, website)
                 if ranked:
@@ -384,13 +438,19 @@ def method_deep_crawl(website: str, homepage_html: str) -> str:
             pass
         return None
 
-    with ThreadPoolExecutor(max_workers=min(len(all_links), 5)) as executor:
-        futures = {executor.submit(check_url, url): url for url in all_links}
-        for future in as_completed(futures, timeout=4):
-            res = future.result()
-            if res:
-                log(f"    [M3-DEEP-PARALLEL] Found: {res}")
-                return res
+    try:
+        with ThreadPoolExecutor(max_workers=min(len(all_links), 3)) as executor:
+            futures = {executor.submit(check_url, url): url for url in all_links}
+            for future in as_completed(futures, timeout=5):
+                try:
+                    res = future.result(timeout=2)
+                    if res:
+                        log(f"    [M3-DEEP-PARALLEL] Found: {res}")
+                        return res
+                except Exception:
+                    pass
+    except Exception:
+        pass
     return ''
 
 
@@ -489,19 +549,32 @@ def domain_resolves(domain: str) -> bool:
 
 
 def search_website_on_google(clinic_name: str, city: str) -> str:
-    """Search Google to find the official website of the clinic if missing (fast, 1 query)."""
+    """Search DDGS (DDG library API) to find the official website of the clinic if missing."""
     if not clinic_name:
         return ""
-    
+
     clean_name = re.sub(r'[^\w\s]', '', clinic_name)
     q = f'"{clean_name}" {city} official website'
-    
+
     ignore = [
         'google.com', 'facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com',
         'youtube.com', 'yelp.', 'tripadvisor.', 'yell.com', 'nhs.uk', 'map', 'search',
-        'bing.com', 'microsoft.com',
+        'bing.com', 'microsoft.com', 'duckduckgo.com',
     ]
-    
+
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            results = list(ddgs.text(q, max_results=3, safesearch='off'))
+        for r in results:
+            href = r.get('href', '')
+            if href.startswith('http') and not any(ig in href.lower() for ig in ignore):
+                log(f"    [WEBSITE SEARCH] Found: {href}")
+                return href
+    except Exception:
+        pass
+
+    # Fallback: Google scrape
     try:
         url = f"https://www.google.com/search?q={urllib.parse.quote(q)}&num=3"
         html = fetch(url, timeout=1.5)
@@ -512,10 +585,10 @@ def search_website_on_google(clinic_name: str, city: str) -> str:
                 if '/url?q=' in href:
                     try:
                         href = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)['q'][0]
-                    except:
+                    except Exception:
                         continue
                 if href.startswith('http') and not any(ig in href.lower() for ig in ignore):
-                    log(f"    [WEBSITE SEARCH] Found: {href}")
+                    log(f"    [WEBSITE SEARCH FALLBACK] Found: {href}")
                     return href
     except Exception as e:
         log(f"    [WARNING] Website search error: {e}")
@@ -525,25 +598,52 @@ def search_website_on_google(clinic_name: str, city: str) -> str:
 def method_construct(clinic_name: str, domain: str) -> str:
     """
     M8: Construct likely email from domain + common prefixes.
+    Works for ALL domains including platform sites — we want maximum coverage.
     """
     if not domain:
         return ''
-    # Skip generic platform domains
-    skip = [
-        'wix.com', 'wordpress.com', 'squarespace.com', 'weebly.com',
-        'shopify.com', 'godaddy.com', 'hostgator.com', 'bluehost.com',
-        'tumblr.com', 'blogger.com', 'site123.com', 'jimdo.com',
-    ]
-    if any(s in domain for s in skip):
-        return ''
-
-    # Bypassed DNS check on Windows to prevent socket hangs
 
     for prefix in CONSTRUCT_PREFIXES:
         candidate = f"{prefix}@{domain}"
         if not is_junk(candidate):
             log(f"    [M8-CONSTRUCT] Generated: {candidate}")
             return candidate
+    return ''
+
+
+def method_ddgs_library_search(clinic_name: str, city: str, domain: str) -> str:
+    """
+    M3.5: Use the duckduckgo_search DDGS library (real DDG API, not HTML scraping)
+    to find emails for a clinic. Fast and reliable.
+    """
+    try:
+        from duckduckgo_search import DDGS
+        queries = []
+        if domain:
+            queries.append(f'site:{domain} email contact')
+        if clinic_name:
+            clean = re.sub(r'[^\w\s]', '', clinic_name)
+            queries.append(f'"{clean}" {city} email contact')
+            queries.append(f'"{clean}" email address contact')  # without city for broader results
+            if domain:
+                queries.append(f'"{clean}" email {domain}')
+
+        for q in queries[:3]:  # Run up to 3 queries
+            try:
+                with DDGS() as ddgs:
+                    results = list(ddgs.text(q, max_results=8, safesearch='off'))
+                for r in results:
+                    combined = f"{r.get('title','')} {r.get('body','')} {r.get('href','')}"
+                    found = extract_from_html(combined, domain or '')
+                    if found:
+                        log(f"    [M3.5-DDGS] {found[0]}")
+                        return found[0]
+            except Exception:
+                pass
+    except ImportError:
+        pass
+    except Exception:
+        pass
     return ''
 
 
@@ -559,7 +659,7 @@ def find_email(clinic: dict, fast_mode=True) -> str:
         if website.startswith('/aclk') or 'google.com/aclk' in website or '/url?q=' in website or 'google.com/url?' in website:
             try:
                 url = 'https://www.google.com' + website if website.startswith('/') else website
-                resp = requests.get(url, timeout=5, allow_redirects=True, headers=HEADERS)
+                resp = _get_session().get(url, timeout=5, allow_redirects=True, verify=False)
                 website = resp.url
                 log(f"    [RESOLVED AD LINK] Real URL: {website}")
             except Exception as e:
@@ -606,12 +706,36 @@ def find_email(clinic: dict, fast_mode=True) -> str:
             return email
 
     if fast_mode:
-        # In fast mode (web app), skip M3 deep crawl and M4-M6 search engines to keep search responsive
-        # and prevent datacenter IP blocks on Render. We fall back directly to construction M8.
+        # ── M3: Deep crawl (on-site, safe & fast) ─────────────────────────────
+        if website and homepage_html:
+            email = method_deep_crawl(website, homepage_html)
+            if email:
+                log(f"  -> [M3] FOUND: {email}")
+                return email
+
+        # ── M3.5: DDGS library search (fast real API, no HTML scraping) ────────
+        email = method_ddgs_library_search(name, city, domain)
+        if email:
+            log(f"  -> [M3.5-DDGS] FOUND: {email}")
+            return email
+
+        # ── M8: Construct email from domain ────────────────────────────────────
         email = method_construct(name, domain)
         if email:
             log(f"  -> [M8-Construct] FOUND: {email}")
             return email
+
+        # ── M9: Last resort — guess domain from business name ──────────────────
+        if not domain and name:
+            # Convert business name to likely domain: "Smith AI Ltd" → "smithai.com"
+            clean_name = re.sub(r'\b(ltd|llc|inc|co|pvt|limited|group|the|and|&)\b', '', name.lower())
+            clean_name = re.sub(r'[^a-z0-9]', '', clean_name).strip()
+            if len(clean_name) >= 3:
+                guessed_domain = f"{clean_name}.com"
+                email = method_construct(name, guessed_domain)
+                if email:
+                    log(f"  -> [M9-NameGuess] FOUND: {email}")
+                    return email
         return ''
 
     # ── M3: Deep crawl ───────────────────────────────────────────────────────

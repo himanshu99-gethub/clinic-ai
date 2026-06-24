@@ -302,16 +302,17 @@ class ClinicScraper:
         try:
             # Using highly optimized JS execution instead of slow page_source dumping and BeautifulSoup parsing
             details = self.driver.execute_script("""
+                var panel = document.querySelector('div[role="main"]') || document.querySelector('[role="main"]') || document.body;
                 var website = "";
                 var phone = "";
                 var address = "";
                 
                 // 1. Website extraction
-                var authLink = document.querySelector('a[data-item-id="authority"]');
+                var authLink = panel.querySelector('a[data-item-id="authority"]');
                 if (authLink && authLink.href) {
                     website = authLink.href;
                 } else {
-                    var links = document.querySelectorAll('a[href]');
+                    var links = panel.querySelectorAll('a[href]');
                     for (var i = 0; i < links.length; i++) {
                         var href = links[i].href;
                         if (href && !href.includes('google.com') && !href.includes('google.co') && !href.startsWith('tel:') && !href.startsWith('mailto:')) {
@@ -322,12 +323,12 @@ class ClinicScraper:
                 }
                 
                 // 2. Phone extraction
-                var phoneEl = document.querySelector('[data-item-id^="phone:tel:"]');
+                var phoneEl = panel.querySelector('[data-item-id^="phone:tel:"]');
                 if (phoneEl) {
                     var itemId = phoneEl.getAttribute('data-item-id');
                     phone = itemId.replace('phone:tel:', '').trim();
                 } else {
-                    var telLinks = document.querySelectorAll('a[href^="tel:"]');
+                    var telLinks = panel.querySelectorAll('a[href^="tel:"]');
                     for (var i = 0; i < telLinks.length; i++) {
                         var telHref = telLinks[i].getAttribute('href');
                         if (telHref) {
@@ -341,11 +342,11 @@ class ClinicScraper:
                 }
                 
                 // 3. Address extraction
-                var addressEl = document.querySelector('[data-item-id="address"]');
+                var addressEl = panel.querySelector('[data-item-id="address"]');
                 if (addressEl) {
                     address = addressEl.textContent.trim();
                 } else {
-                    var anyAddr = document.querySelector('[data-item-id*="address"]');
+                    var anyAddr = panel.querySelector('[data-item-id*="address"]');
                     if (anyAddr) {
                         address = anyAddr.textContent.trim();
                     }

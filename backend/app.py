@@ -251,6 +251,14 @@ def is_duplicate_clinic(clinic_data, exclude_name=None, check_supabase=True):
     phone = clinic_data.get("phone", "").strip().lower()
     email = clinic_data.get("email", "").strip().lower()
     
+    GENERIC_DOMAINS = [
+        'data.ai', 'google.com', 'yelp.com', 'yelp.co', 'tripadvisor.com',
+        'facebook.com', 'linkedin.com', 'instagram.com', 'twitter.com',
+        'yellowpages.com', 'yell.com', 'cylex.com', 'hotfrog.com',
+        'businesses.com', 'directory.', 'crunchbase.com', 'clutch.co',
+        'g2.com', 'trustpilot.com', 'zoominfo.com',
+    ]
+    
     def clean_web(url):
         if not url:
             return ""
@@ -268,10 +276,12 @@ def is_duplicate_clinic(clinic_data, exclude_name=None, check_supabase=True):
             log(f"Duplicate found by name: {name}", "INFO")
             return True
             
-        # Website duplicate
+        # Website duplicate — skip check for known directory/aggregator sites
+        # (Google Maps sometimes returns directory URLs for multiple businesses)
         if web_clean and c.get("website"):
             c_web = clean_web(c["website"])
-            if c_web == web_clean:
+            # Only flag as duplicate if the website is specific (not a generic directory)
+            if c_web == web_clean and not any(gd in web_clean for gd in GENERIC_DOMAINS):
                 log(f"Duplicate found by website: {website}", "INFO")
                 return True
                 
@@ -296,7 +306,7 @@ def is_duplicate_clinic(clinic_data, exclude_name=None, check_supabase=True):
             or_parts = [f"name.ilike.{name}"]
             if phone:
                 or_parts.append(f"phone.eq.{phone}")
-            if web_clean:
+            if web_clean and not any(gd in web_clean for gd in GENERIC_DOMAINS):
                 or_parts.append(f"website.ilike.%{web_clean}%")
             if email:
                 or_parts.append(f"email.ilike.{email}")
@@ -474,7 +484,7 @@ def auto_send(clinic, template=None):
 # FAST API-BASED SEARCH (no Selenium — works on Render)
 # ────────────────────────────────────────────────────────────
 
-def _search_via_ddg_library(query, max_results=20):
+def _search_via_ddg_library(query, max_results=30):
     """
     Use the duckduckgo_search Python library (DDG's real API endpoint, not HTML scraping).
     Returns list of {title, href, body} dicts.
@@ -679,27 +689,56 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
         log(f"[SCRAPER_TASK_QUERY_SETUP] Setting up query variations", "INFO")
         
         # Determine if the specialization/category looks like a medical field
-        medical_keywords = ['clinic', 'health', 'dental', 'doctor', 'physio', 'gynae', 'pediatr', 'cardi', 'hospital', 'medical', 'dentist', 'gynaecologist', 'clinics']
+        medical_keywords = ['clinic', 'health', 'dental', 'doctor', 'physio', 'gynae', 'pediatr',
+                            'cardi', 'hospital', 'medical', 'dentist', 'gynaecologist', 'clinics',
+                            'therapy', 'surgeon', 'ortho', 'derma', 'neuro', 'optic']
         is_medical = any(w in specialization.lower() for w in medical_keywords)
-        
+
+        # For short/generic terms like "AI", "ML", "SEO" — add business-type suffixes so search
+        # engines return actual companies instead of news articles, tools, or events.
+        spec_is_short = len(specialization.split()) <= 2
+        business_suffixes = ['company', 'agency', 'startup', 'firm', 'consultancy', 'services']
+
         if is_medical:
             base_queries = [
                 f"{specialization} in {city}",
                 f"best {specialization} in {city}",
+                f"top {specialization} in {city}",
+                f"{specialization} near {city}",
+                f"list of {specialization} in {city}",
+                f"{specialization} directory {city}",
+            ]
+        elif spec_is_short:
+            # Generic/tech terms: add business suffixes to target actual companies
+            base_queries = [
+                f"{specialization} company in {city}",
+                f"{specialization} agency in {city}",
+                f"{specialization} startup in {city}",
+                f"{specialization} firm in {city}",
+                f"{specialization} consultancy in {city}",
+                f"top {specialization} companies in {city}",
+                f"best {specialization} agency in {city}",
+                f"list of {specialization} companies {city}",
+                f"{specialization} companies directory {city}",
+                f"{specialization} services {city}",
             ]
         else:
             base_queries = [
                 f"{specialization} in {city}",
                 f"best {specialization} in {city}",
+                f"top {specialization} in {city}",
+                f"{specialization} near {city}",
+                f"list of {specialization} in {city}",
+                f"{specialization} directory {city}",
             ]
-        
+
         query_variations = []
         for q in base_queries:
             if country:
                 query_variations.append(f"{q}, {country}")
             else:
                 query_variations.append(q)
-                
+
         # Remove any duplicates in queries
         seen_qs = set()
         unique_queries = []
@@ -715,7 +754,7 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
         results = []
         # Populate seen_names from memory (live_db) to avoid scraping duplicates in subsequent runs or queries
         seen_names = {c["name"].strip().lower() for c in live_db if c.get("name")}
-        TARGET_CLINICS = 50  # Target: 50 unique clinics
+        TARGET_CLINICS = 150  # Target: 150 unique clinics
         
         # Detect if running on Render (cloud) environment — use DDG fallback first
         is_render = os.getenv("RENDER", "").lower() in ["1", "true", "yes"] or os.getenv("RENDER_SERVICE_NAME", "")
@@ -749,8 +788,9 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
 
                 log(f"[PROCESS_EXTRACT] Attempting email extraction for {name} with website: {website}", "INFO")
                 
-                # Extract email using fill_emails_max logic (M0 to M8)
-                email = extract_email_max(clinic_ref)
+                # Extract email: M1 homepage + M2 subpages + M3 deep crawl + M8 construct
+                # Skips M4-M7 (Google/Bing/DDG/WHOIS) to keep extraction fast
+                email = extract_email_max(clinic_ref, fast_mode=True)
                 
                 clinic_ref["email"] = email
                 clinic_ref["status"] = "Verified" if email else "Unverified"
@@ -846,106 +886,109 @@ def run_scraper_task(city, country, specialization, auto_outreach, template=""):
         
         # ── Phase 1: DuckDuckGo fast search (no Selenium, works great on Render) ──
         ddg_total = 0
-        if is_render:
-            add_log("🌐 Phase 1: Fast DuckDuckGo search (no browser required)...")
-            for idx, query in enumerate(query_variations):
-                if len(live_db) >= TARGET_CLINICS:
-                    add_log(f"🎯 Target of {TARGET_CLINICS} clinics reached. Stopping DDG search.")
-                    break
-                log(f"[DDG_PHASE] Query {idx+1}/{len(query_variations)}: {query}", "INFO")
-                add_log(f"🦆 DDG Query {idx+1}/{len(query_variations)}: {query} | Found: {len(live_db)}")
-                count = run_ddg_fallback_search(query, on_clinic_found, seen_names, city, country, specialization)
-                ddg_total += count
-            add_log(f"✅ DDG Phase complete — found {ddg_total} new leads. Total so far: {len(live_db)}")
-            log(f"[DDG_PHASE_DONE] DDG phase found {ddg_total} clinics", "INFO")
-        
-        # ── Phase 2: Selenium/Google Maps (only if DDG found 0 OR not on Render) ──
-        use_selenium = not is_render or ddg_total == 0
-        if use_selenium:
-            if is_render:
-                add_log("⚠️ DDG returned 0 results. Falling back to Selenium/Google Maps...")
-            else:
-                add_log("🔍 Phase 1: Selenium/Google Maps search...")
-            
+        # ── Phase 1: DuckDuckGo search — ALWAYS runs (local + Render) ──────────
+        add_log("🌐 Phase 1: DuckDuckGo API search (fast, no browser)...")
+        for idx, query in enumerate(query_variations):
+            if len(results) >= TARGET_CLINICS:
+                add_log(f"🎯 Target of {TARGET_CLINICS} clinics reached. Stopping DDG search.")
+                break
+            log(f"[DDG_PHASE] Query {idx+1}/{len(query_variations)}: {query}", "INFO")
+            add_log(f"🦆 DDG Query {idx+1}/{len(query_variations)}: {query} | Found in this run: {len(results)}")
+            count = run_ddg_fallback_search(query, on_clinic_found, seen_names, city, country, specialization)
+            ddg_total += count
+        add_log(f"✅ DDG Phase complete — found {ddg_total} new leads. Total in this run: {len(results)}")
+        log(f"[DDG_PHASE_DONE] DDG phase found {ddg_total} clinics", "INFO")
+
+        # ── Phase 2: Selenium/Google Maps — runs locally to supplement DDG ──────
+        use_selenium = not is_render  # Only on local; Render has no Chrome
+        if use_selenium and len(results) < TARGET_CLINICS:
+            add_log(f"🔍 Phase 2: Selenium/Google Maps search (found {len(results)} so far in this run, need {TARGET_CLINICS})...")
+
             # Initialize Selenium only when needed
             if scraper is None:
                 log(f"[SCRAPER_TASK_INIT] Creating ClinicScraper instance...", "INFO")
                 scraper = ClinicScraper()
                 log(f"[SCRAPER_TASK_CREATED] ClinicScraper instance created successfully", "OK")
-            
+
             for idx, query in enumerate(query_variations):
                 # Stop if we've already found enough clinics
-                if len(live_db) >= TARGET_CLINICS:
+                if len(results) >= TARGET_CLINICS:
                     log(f"[SCRAPER_TASK_TARGET_REACHED] Reached {TARGET_CLINICS} unique clinics, stopping queries", "INFO")
                     add_log(f"🎯 Target of {TARGET_CLINICS} clinics reached after query {idx+1}. Stopping search.")
                     break
 
-                log(f"[SCRAPER_TASK_QUERY_{idx}] Query {idx+1}/{len(query_variations)}: {query} (found {len(live_db)} so far)", "INFO")
-                add_log(f"🔍 Query {idx+1}/{len(query_variations)}: {query} | Found so far: {len(live_db)}")
-                
+                log(f"[SCRAPER_TASK_QUERY_{idx}] Query {idx+1}/{len(query_variations)}: {query} (found {len(results)} so far in this run)", "INFO")
+                add_log(f"🔍 Query {idx+1}/{len(query_variations)}: {query} | Found so far in this run: {len(results)}")
+
                 try:
                     scraper.search_google_maps(query, on_clinic_found=on_clinic_found, exclude_names=seen_names)
                     add_log(f"Query {idx+1} done. Total unique clinics: {len(results)}")
                 except Exception as query_err:
                     log(f"[SCRAPER_TASK_QUERY_{idx}_ERROR] Query failed: {str(query_err)}\n{traceback.format_exc()}", "ERROR")
                     add_log(f"Query {idx+1} failed: {str(query_err)}", "WARNING")
-        else:
-            # Close Selenium immediately since we won't need it
-            if scraper:
-                try:
-                    log(f"[SCRAPER_TASK_CLEANUP] DDG succeeded — closing unused scraper browser early...", "INFO")
-                    scraper.close()
-                    scraper = None
-                    log("Scraper browser closed early (DDG succeeded)", "OK")
-                except Exception as e:
-                    log(f"Error closing scraper early: {str(e)}", "WARNING")
+        elif is_render and ddg_total == 0:
+            add_log("⚠️ DDG returned 0 results on Render. No Selenium fallback available.")
 
 
-        # Ensure we have at least 50 unique clinics. If not, trigger expansion queries.
-        if len(live_db) < 50:
-            log(f"[SCRAPER_TASK_EXPANSION] Only found {len(live_db)} unique clinics. Initiating search expansion...", "INFO")
-            add_log(f"⚠️ Search yielded only {len(live_db)} clinics. Triggering dynamic search expansion to meet 50+ target...")
-            
-            expansion_queries = [
-                f"{specialization} near {city}",
-                f"{specialization} in {city} surrounding areas",
-            ]
+
+        # Ensure we have at least 150 unique clinics. If not, trigger expansion queries.
+        if len(results) < TARGET_CLINICS:
+            log(f"[SCRAPER_TASK_EXPANSION] Only found {len(results)} unique clinics. Initiating search expansion...", "INFO")
+            add_log(f"⚠️ Search yielded only {len(results)} clinics. Triggering dynamic search expansion to meet {TARGET_CLINICS}+ target...")
+
+            if spec_is_short and not is_medical:
+                # For generic/tech terms: use different business suffixes in expansion
+                expansion_queries = [
+                    f"{specialization} solutions {city}",
+                    f"{specialization} tech company {city}",
+                    f"{specialization} development company {city}",
+                    f"{specialization} software company {city}",
+                    f"hire {specialization} {city}",
+                    f"{specialization} experts {city}",
+                ]
+            else:
+                expansion_queries = [
+                    f"{specialization} in {city} surrounding areas",
+                    f"affordable {specialization} in {city}",
+                    f"{specialization} centre {city}",
+                    f"{specialization} services {city}",
+                ]
             if country:
                 expansion_queries = [f"{q}, {country}" for q in expansion_queries]
-                
+
             # Filter duplicates or queries we already ran
             unique_exp_queries = []
             for eq in expansion_queries:
                 if eq.lower() not in seen_qs:
                     seen_qs.add(eq.lower())
                     unique_exp_queries.append(eq)
-            
-            # Phase 1 expansion: DDG
-            if is_render:
-                for idx_exp, query in enumerate(unique_exp_queries):
-                    if len(live_db) >= 50:
-                        break
-                    log(f"[SCRAPER_TASK_EXPANSION_DDG_{idx_exp}] DDG Expansion: {query}", "INFO")
-                    add_log(f"🦆 DDG Expansion {idx_exp+1}: {query} | Found so far: {len(live_db)}")
-                    run_ddg_fallback_search(query, on_clinic_found, seen_names, city, country, specialization)
+
+            # DDG expansion — ALWAYS runs (local + Render)
+            for idx_exp, query in enumerate(unique_exp_queries):
+                if len(results) >= TARGET_CLINICS:
+                    break
+                log(f"[SCRAPER_TASK_EXPANSION_DDG_{idx_exp}] DDG Expansion: {query}", "INFO")
+                add_log(f"🦆 DDG Expansion {idx_exp+1}: {query} | Found so far in this run: {len(results)}")
+                run_ddg_fallback_search(query, on_clinic_found, seen_names, city, country, specialization)
+
             
             # Phase 2 expansion: Selenium (only if scraper still alive and we need more)
-            if scraper and len(live_db) < 50:
+            if scraper and len(results) < TARGET_CLINICS:
                 for idx_exp, query in enumerate(unique_exp_queries):
-                    if len(live_db) >= 50:
-                        log(f"[SCRAPER_TASK_EXPANSION_TARGET_REACHED] Reached {len(live_db)} unique clinics, stopping expansion", "INFO")
-                        add_log(f"🎯 Target of 50+ unique clinics reached during search expansion. Stopping search.")
+                    if len(results) >= TARGET_CLINICS:
+                        log(f"[SCRAPER_TASK_EXPANSION_TARGET_REACHED] Reached {len(results)} unique clinics, stopping expansion", "INFO")
+                        add_log(f"🎯 Target of {TARGET_CLINICS}+ unique clinics reached during search expansion. Stopping search.")
                         break
                         
-                    log(f"[SCRAPER_TASK_EXPANSION_{idx_exp}] Expansion Query {idx_exp+1}/{len(unique_exp_queries)}: {query} (found {len(live_db)} so far)", "INFO")
-                    add_log(f"🔍 Expansion Query {idx_exp+1}/{len(unique_exp_queries)}: {query} | Found so far: {len(live_db)}")
+                    log(f"[SCRAPER_TASK_EXPANSION_{idx_exp}] Expansion Query {idx_exp+1}/{len(unique_exp_queries)}: {query} (found {len(results)} so far in this run)", "INFO")
+                    add_log(f"🔍 Expansion Query {idx_exp+1}/{len(unique_exp_queries)}: {query} | Found so far in this run: {len(results)}")
                     
                     try:
                         scraper.search_google_maps(query, on_clinic_found=on_clinic_found, exclude_names=seen_names)
                         add_log(f"Expansion Query {idx_exp+1} done. Total unique clinics: {len(results)}")
                     except Exception as query_err:
                         log(f"[SCRAPER_TASK_EXPANSION_{idx_exp}_ERROR] Expansion query failed: {str(query_err)}\n{traceback.format_exc()}", "ERROR")
-                        add_log(f"Expansion Query {idx_exp+1} failed: {str(query_err)}", "WARNING")
+                        add_log(f"Expansion Query {idx_exp+1} failed: {str(query_err)}")
 
         
         # Close Selenium browser and release lock immediately to free up resources
