@@ -2,6 +2,7 @@ import time
 import re
 import urllib.parse
 import traceback
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from bs4 import BeautifulSoup
@@ -39,7 +40,17 @@ class ClinicScraper:
             options.add_argument("--lang=en-US")
             options.add_argument("--disable-gpu")
             options.add_argument("--disable-blink-features=AutomationControlled")
-            options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            
+            # Rotate User-Agents to avoid fingerprinting
+            user_agents = [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0"
+            ]
+            options.add_argument(f"user-agent={random.choice(user_agents)}")
+            
             options.add_argument("--log-level=3")
             options.add_argument("--disable-extensions")
             options.add_argument("--window-size=1920,1080")
@@ -133,7 +144,8 @@ class ClinicScraper:
                         var results_div = document.querySelector('div[role="feed"]') || document.querySelector('[role="main"]') || document.body;
                         results_div.scrollTop += 3000;
                     """)
-                    time.sleep(0.6)
+                    # Human-like delay for scrolling
+                    time.sleep(random.uniform(1.5, 3.5))
                     new_links = self.driver.find_elements(By.CLASS_NAME, "hfpxzc")
                     log(f"After scroll {scroll_count + 1}: Found {len(new_links)} total links")
                     
@@ -180,9 +192,9 @@ class ClinicScraper:
                     
                     # Click on the clinic to view details
                     try:
-                        # Scroll element into view — minimal sleep
+                        # Scroll element into view and add human delay
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link)
-                        time.sleep(0.1)
+                        time.sleep(random.uniform(0.5, 1.5))
                         
                         try:
                             link.click()
