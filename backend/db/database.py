@@ -1,5 +1,6 @@
 """
 SQLite Database — campaign history and send logs using aiosqlite.
+Supports Vercel Serverless environment (/tmp fallback).
 """
 
 import aiosqlite
@@ -8,11 +9,18 @@ import json
 import datetime
 from typing import List, Dict, Any, Optional
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "campaigns.db")
+if os.environ.get("VERCEL"):
+    DB_PATH = "/tmp/campaigns.db"
+else:
+    DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "campaigns.db")
 
 
 async def init_db():
     """Create tables if they don't exist."""
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS campaigns (
@@ -39,116 +47,102 @@ async def init_db():
                 campaign_id INTEGER NOT NULL,
                 email TEXT NOT NULL,
                 name TEXT,
-                source_file TEXT,
                 status TEXT DEFAULT 'pending',
                 error TEXT,
                 sent_at TEXT,
-                FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+                FOREIGN KEY (campaign_id) REFERENCES campaigns (id) ON DELETE CASCADE
             )
         """)
         await db.commit()
 
 
-async def create_campaign(data: Dict[str, Any]) -> int:
-    """Insert a new campaign and return its ID."""
-    now = datetime.datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("""
-            INSERT INTO campaigns
-                (name, subject, body_html, body_text, signature,
-                 smtp_host, smtp_port, smtp_username,
-                 total_recipients, status, created_at)
+async def get_db():
+    db = await aiosqlite.connect(DB_PATH)
+    db.row_factory = aiosqlite.Row
+    return db
+
+
+async def create_campaign(
+    name: str,
+    subject: str,
+    body_html: str,
+    body_text: str,
+    signature: str,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_username: str,
+    total_recipients: int,
+) -> int:
+    async with await get_db() as db:
+        now = datetime.datetime.utcnow().isoformat()
+        cursor = await db.execute(
+            """
+            INSERT INTO campaigns (name, subject, body_html, body_text, signature, smtp_host, smtp_port, smtp_username, total_recipients, status, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
-        """, (
-            data.get("name", "Untitled Campaign"),
-            data.get("subject", ""),
-            data.get("body_html", ""),
-            data.get("body_text", ""),
-            data.get("signature", ""),
-            data.get("smtp_host", ""),
-            data.get("smtp_port", 587),
-            data.get("smtp_username", ""),
-            data.get("total_recipients", 0),
-            now,
-        ))
+            """,
+            (name, subject, body_html, body_text, signature, smtp_host, smtp_port, smtp_username, total_recipients, now)
+        )
         await db.commit()
         return cursor.lastrowid
 
 
-async def insert_recipients(campaign_id: int, recipients: List[Dict]) -> None:
-    """Bulk insert recipients for a campaign."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.executemany("""
-            INSERT INTO recipients (campaign_id, email, name, source_file, status)
-            VALUES (?, ?, ?, ?, 'pending')
-        """, [
-            (campaign_id, r["email"], r.get("name", ""), r.get("source", ""))
-            for r in recipients
-        ])
+async def insert_recipients(campaign_id: int, recipients: List[Dict[str, str]]):
+    async with await get_db() as db:
+        for r in recipients:
+            await db.execute(
+                "INSERT INTO recipients (campaign_id, email, name, status) VALUES (?, ?, ?, 'pending')",
+                (campaign_id, r["email"], r.get("name", ""))
+            )
         await db.commit()
 
 
-async def update_recipient_status(
-    campaign_id: int, email: str, status: str, error: Optional[str] = None
-) -> None:
-    """Update a recipient's send status."""
-    sent_at = datetime.datetime.utcnow().isoformat() if status == "sent" else None
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            UPDATE recipients
-            SET status = ?, error = ?, sent_at = ?
-            WHERE campaign_id = ? AND email = ?
-        """, (status, error, sent_at, campaign_id, email))
-        await db.commit()
-
-
-async def complete_campaign(campaign_id: int, sent: int, failed: int, status: str = "completed") -> None:
-    """Mark a campaign as complete with final counts."""
-    now = datetime.datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            UPDATE campaigns
-            SET status = ?, sent_count = ?, failed_count = ?, completed_at = ?
-            WHERE id = ?
-        """, (status, sent, failed, now, campaign_id))
-        await db.commit()
-
-
-async def list_campaigns() -> List[Dict]:
-    """Return all campaigns ordered by newest first."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("""
-            SELECT * FROM campaigns ORDER BY created_at DESC
-        """)
-        rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
-
-
-async def get_campaign(campaign_id: int) -> Optional[Dict]:
-    """Get a single campaign by ID."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM campaigns WHERE id = ?", (campaign_id,))
-        row = await cursor.fetchone()
-        return dict(row) if row else None
-
-
-async def get_recipients(campaign_id: int) -> List[Dict]:
-    """Get all recipients for a campaign."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM recipients WHERE campaign_id = ? ORDER BY id",
-            (campaign_id,)
+async def update_recipient_status(campaign_id: int, email: str, status: str, error: Optional[str] = None):
+    async with await get_db() as db:
+        now = datetime.datetime.utcnow().isoformat() if status in ("sent", "failed") else None
+        await db.execute(
+            "UPDATE recipients SET status = ?, error = ?, sent_at = ? WHERE campaign_id = ? AND email = ?",
+            (status, error, now, campaign_id, email)
         )
-        rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
+        if status == "sent":
+            await db.execute("UPDATE campaigns SET sent_count = sent_count + 1 WHERE id = ?", (campaign_id,))
+        elif status == "failed":
+            await db.execute("UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ?", (campaign_id,))
+        await db.commit()
 
 
-async def delete_campaign(campaign_id: int) -> None:
-    """Delete a campaign and its recipients."""
-    async with aiosqlite.connect(DB_PATH) as db:
+async def complete_campaign(campaign_id: int, status: str = "completed"):
+    async with await get_db() as db:
+        now = datetime.datetime.utcnow().isoformat()
+        await db.execute(
+            "UPDATE campaigns SET status = ?, completed_at = ? WHERE id = ?",
+            (status, now, campaign_id)
+        )
+        await db.commit()
+
+
+async def list_campaigns() -> List[Dict[str, Any]]:
+    async with await get_db() as db:
+        async with db.execute("SELECT * FROM campaigns ORDER BY id DESC") as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def get_campaign(campaign_id: int) -> Optional[Dict[str, Any]]:
+    async with await get_db() as db:
+        async with db.execute("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def get_recipients(campaign_id: int) -> List[Dict[str, Any]]:
+    async with await get_db() as db:
+        async with db.execute("SELECT * FROM recipients WHERE campaign_id = ? ORDER BY id ASC", (campaign_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def delete_campaign(campaign_id: int):
+    async with await get_db() as db:
         await db.execute("DELETE FROM recipients WHERE campaign_id = ?", (campaign_id,))
         await db.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))
         await db.commit()

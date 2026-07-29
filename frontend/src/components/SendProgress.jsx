@@ -7,7 +7,7 @@ import {
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081/api';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 const fmtDur = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 
 const STATUS_LABEL = { starting: 'Starting…', running: 'Sending', paused: 'Paused', done: 'Complete', cancelled: 'Cancelled', error: 'Error' };

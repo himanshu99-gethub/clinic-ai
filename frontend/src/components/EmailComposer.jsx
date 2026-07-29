@@ -9,7 +9,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import { Link005 } from './ui/skiper40';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081/api';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
 const PRESETS = [
   { name: 'Gmail',   host: 'smtp.gmail.com',       port: 587, use_tls: true },
