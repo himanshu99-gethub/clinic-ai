@@ -2,6 +2,6 @@
   "name": "ai-powered-bulk-email-sender-root",
   "private": true,
   "scripts": {
-    "build": "npm run build --prefix frontend"
+    "build": "npm run build"
   }
 }
