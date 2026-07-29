@@ -1,735 +1,272 @@
-import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Toaster } from 'react-hot-toast';
+import {
+  Upload, Mail, FileText, Send, CheckCircle2,
+  ArrowRight, ArrowLeft, Zap, Users, Copy, BarChart3
+} from 'lucide-react';
+
 import Navbar from './components/Navbar';
 import StatsCard from './components/StatsCard';
-import SearchForm from './components/SearchForm';
-import ClinicTable from './components/ClinicTable';
-import AgentActivityLog from './components/AgentActivityLog';
+import FileUploader from './components/FileUploader';
+import EmailTable from './components/EmailTable';
+import EmailComposer from './components/EmailComposer';
+import SendProgress from './components/SendProgress';
+import CampaignHistory from './components/CampaignHistory';
 
-const getApiUrl = () => {
-  if (import.meta.env.VITE_API_BASE_URL) {
-    return import.meta.env.VITE_API_BASE_URL;
-  }
-  if (window.location.port === '5173') {
-    return 'http://localhost:8081/api';
-  }
-  if (window.location.hostname.endsWith('vercel.app')) {
-    return 'https://clinic-ai-fuc9.onrender.com/api';
-  }
-  return '/api';
-};
-const API_BASE_URL = getApiUrl();
+/* ── Step config ─────────────────────────────────── */
+const STEPS = [
+  { id: 'upload',  label: 'Upload',  icon: Upload },
+  { id: 'review',  label: 'Review',  icon: Mail },
+  { id: 'compose', label: 'Compose', icon: FileText },
+  { id: 'send',    label: 'Send',    icon: Send },
+];
 
-
-// Configure axios with better error handling
-axios.interceptors.response.use(
-  response => response,
-  error => {
-    console.error('[API Error]', error);
-    return Promise.reject(error);
-  }
-);
-
-// ── Template Editor ──────────────────────────────────────
-const TemplateEditor = ({ template, onSave }) => {
-  const getInitialState = (tpl) => {
-    const str = tpl || "";
-    if (str.trim().toLowerCase().startsWith("subject:")) {
-      const idx = str.indexOf('\n');
-      if (idx !== -1) {
-        const firstLine = str.substring(0, idx);
-        const subject = firstLine.replace(/Subject:/i, '').trim();
-        const body = str.substring(idx + 1).trim();
-        return { subject, body };
-      }
-    }
-    return { subject: "Strategic Partnership Inquiry", body: str };
-  };
-
-  const initial = getInitialState(template);
-  const [subject, setSubject] = useState(initial.subject);
-  const [body, setBody] = useState(initial.body);
-  const [testEmail, setTestEmail] = useState('');
-  const [testingEmail, setTestingEmail] = useState(false);
-
-  // Keep local state in sync with saved protocol
-  useEffect(() => {
-    const updated = getInitialState(template);
-    setSubject(updated.subject);
-    setBody(updated.body);
-  }, [template]);
-
-  const handleSave = () => {
-    const combined = `Subject: ${subject}\n${body}`;
-    onSave(combined);
-  };
-
-  const handleSendTest = async () => {
-    if (!testEmail) {
-      alert('Please enter a recipient email address');
-      return;
-    }
-    setTestingEmail(true);
-    try {
-      const combined = `Subject: ${subject}\n${body}`;
-      const res = await axios.post(`${API_BASE_URL}/send-test-email`, {
-        email: testEmail,
-        template: combined
-      });
-      alert(res.data.message || 'Test email sent successfully!');
-    } catch (e) {
-      console.error(e);
-      alert('Failed to send test email: ' + getErrorMessage(e));
-    } finally {
-      setTestingEmail(false);
-    }
-  };
-
+/* ── Step indicator ──────────────────────────────── */
+function StepBar({ current }) {
+  const ci = STEPS.findIndex(s => s.id === current);
   return (
-    <div className="glass-panel" style={{ padding: '40px', position: 'relative' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <div>
-          <h2 style={{ fontSize: '20px', fontWeight: 900, color: '#fff', textTransform: 'uppercase', letterSpacing: '1px' }}>Global Protocol Editor</h2>
-          <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginTop: '4px', textTransform: 'uppercase', letterSpacing: '2px' }}>
-            Configure your Outreach Subject and Template Body
-          </p>
-        </div>
-        <button onClick={handleSave} className="glow-btn" style={{
-          padding: '12px 32px', background: '#2E77AE', border: 'none', borderRadius: '12px',
-          color: '#fff', fontWeight: 800, fontSize: '12px', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '2px'
-        }}>💾 Save Protocol</button>
-      </div>
+    <div style={{ display: 'flex', alignItems: 'center', padding: '14px 0 20px', overflowX: 'auto' }}>
+      {STEPS.map((s, i) => {
+        const Icon = s.icon;
+        const done = i < ci, active = i === ci;
+        return (
+          <React.Fragment key={s.id}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                background: done ? '#22c55e' : active ? '#6366f1' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${done ? '#22c55e' : active ? '#6366f1' : 'rgba(255,255,255,0.08)'}`,
+                transition: 'all 0.3s',
+              }}>
+                {done ? <CheckCircle2 size={14} color="white" /> : <Icon size={13} color={active ? 'white' : '#3f3f46'} />}
+              </div>
+              <span style={{ fontSize: 12.5, fontWeight: active ? 700 : 500, color: done ? '#22c55e' : active ? '#818cf8' : '#52525b', whiteSpace: 'nowrap', letterSpacing: '-0.1px' }}>
+                {s.label}
+              </span>
+            </div>
+            {i < STEPS.length - 1 && (
+              <div className="step-line" style={{ background: done ? '#22c55e40' : 'rgba(255,255,255,0.05)' }} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
 
-      {/* Subject Line */}
-      <div style={{ marginBottom: '24px' }}>
-        <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#2E77AE', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px' }}>
-          📧 Email Subject Line
-        </label>
-        <input 
-          type="text"
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          placeholder="Enter outreach subject line..."
-          style={{
-            width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: '10px', padding: '12px 16px', color: '#fff', fontSize: '14px', outline: 'none'
-          }}
-        />
+/* ── Section header ─────────────────────────────── */
+function SectionHead({ icon: Icon, title, sub, color = '#6366f1' }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 20 }}>
+      <div style={{ width: 36, height: 36, borderRadius: 10, background: `${color}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: `1px solid ${color}20` }}>
+        <Icon size={16} style={{ color }} />
       </div>
-
-      {/* Email Body */}
-      <div style={{ marginBottom: '24px' }}>
-        <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#2E77AE', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '8px' }}>
-          📝 Email Body Template
-        </label>
-        <p style={{ fontSize: '12px', color: '#2E77AE', fontWeight: 700, marginBottom: '8px' }}>
-          💡 TIP: Use <code style={{ color: '#FF8E2B' }}>[Business Name]</code> or <code style={{ color: '#FF8E2B' }}>[Company Name]</code> as a placeholder for the business name.
-        </p>
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="Dear Administrative Team, ..."
-          style={{
-            width: '100%', minHeight: '260px', background: 'rgba(0,0,0,0.5)',
-            border: '1px solid rgba(255,255,255,0.1)', borderRadius: '14px',
-            padding: '20px', color: '#fff', fontSize: '14px', lineHeight: '1.8', outline: 'none'
-          }}
-        />
-      </div>
-
-      {/* Test Email Tool */}
-      <div style={{ 
-        background: 'rgba(255,142,43,0.05)', border: '1px solid rgba(255,142,43,0.15)',
-        padding: '20px', borderRadius: '16px'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <p style={{ fontSize: '11px', color: '#FF8E2B', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>
-            🧪 Send Test Email
-          </p>
-          {testingEmail && <span style={{ fontSize: '10px', color: '#4ade80', fontWeight: 800, animation: 'pulse 1s infinite' }}>SENDING TEST...</span>}
-        </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <input 
-            value={testEmail}
-            onChange={(e) => setTestEmail(e.target.value)}
-            placeholder="Enter recipient email (e.g. your_email@gmail.com)..."
-            style={{
-              flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)',
-              borderRadius: '10px', padding: '10px 16px', color: '#fff', fontSize: '13px', outline: 'none'
-            }}
-          />
-          <button 
-            onClick={handleSendTest}
-            disabled={testingEmail}
-            style={{
-              padding: '10px 20px', background: testingEmail ? 'rgba(255,255,255,0.1)' : 'rgba(255,142,43,0.2)', 
-              border: '1px solid rgba(255,142,43,0.3)',
-              borderRadius: '10px', color: '#fff', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
-              transition: 'all 0.2s', textTransform: 'uppercase'
-            }}
-          >
-            {testingEmail ? '⌛ Sending...' : 'Send Test'}
-          </button>
-        </div>
+      <div>
+        <h2 style={{ fontSize: 15, fontWeight: 800, color: '#fafafa', letterSpacing: '-0.3px', lineHeight: 1 }}>{title}</h2>
+        <p style={{ fontSize: 12, color: '#52525b', marginTop: 3 }}>{sub}</p>
       </div>
     </div>
   );
+}
+
+/* ── Page transition ─────────────────────────────── */
+const PV = {
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.28, ease: [0.4, 0, 0.2, 1] } },
+  exit:    { opacity: 0, y: -6, transition: { duration: 0.15 } },
 };
 
-const getErrorMessage = (e) => {
-  if (!e) return '';
-  if (typeof e === 'string') return e;
-  if (e.response?.data) {
-    const data = e.response.data;
-    if (typeof data.error === 'string') return data.error;
-    if (typeof data.error === 'object' && data.error !== null) {
-      return data.error.message || JSON.stringify(data.error);
-    }
-    if (typeof data.message === 'string') return data.message;
-    if (typeof data === 'string') return data;
-    return JSON.stringify(data);
-  }
-  return e.message || String(e);
-};
-
-// ── Main App ─────────────────────────────────────────────
+/* ── Main App ─────────────────────────────────────── */
 export default function App() {
-  const [clinics, setClinics] = useState([]);
-  const [stats, setStats] = useState({ total: 0, verified: 0, unverified: 0, scraper_running: false });
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [activeFilter, setActiveFilter] = useState(null);
-  const [sending, setSending] = useState(false);
-  const [isVercelMisconfigured, setIsVercelMisconfigured] = useState(false);
+  const [page, setPage] = useState('upload');           // upload | history
+  const [step, setStep] = useState('upload');           // upload | review | compose | send
+  const [emailData, setEmailData] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [selectedEmails, setSelectedEmails] = useState([]);
+  const [sendPayload, setSendPayload] = useState(null);
 
-  useEffect(() => {
-    if (window.location.hostname.endsWith('vercel.app') && API_BASE_URL === '/api') {
-      setIsVercelMisconfigured(true);
-    }
-  }, []);
-
-  // Safety net: loading can NEVER be stuck for more than 15 seconds
-  useEffect(() => {
-    if (!loading) return;
-    const safetyTimer = setTimeout(() => {
-      setLoading(false);
-      console.warn('[Safety] Loading timeout — forcing reset');
-    }, 15000);
-    return () => clearTimeout(safetyTimer);
-  }, [loading]);
-  const [selectedClinic, setSelectedClinic] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const stopOutreachRef = useRef(false);
-
-  const getSavedTemplate = () => {
-    const saved = localStorage.getItem('outreach_template');
-    if (saved) return saved;
-    return "";
+  const stats = {
+    valid:   emailData?.stats?.valid_count     ?? 0,
+    dupes:   emailData?.stats?.duplicate_count ?? 0,
+    invalid: emailData?.stats?.invalid_count   ?? 0,
+    sel:     selectedEmails.length,
   };
 
-  const [globalTemplate, setGlobalTemplate] = useState(getSavedTemplate());
-
-  // Fetch template from backend on mount
-  useEffect(() => {
-    const fetchTemplate = async () => {
-      try {
-        const res = await axios.get(`${API_BASE_URL}/template`);
-        if (res.data && res.data.template) {
-          setGlobalTemplate(res.data.template);
-        }
-      } catch (e) {
-        console.error('Failed to fetch template from backend:', e);
-      }
-    };
-    fetchTemplate();
-  }, []);
-
-  const fetchData = async (filter) => {
-    try {
-      const params = filter || {};
-      const [clinicsRes, statsRes, logsRes] = await Promise.all([
-        axios.get(`${API_BASE_URL}/clinics`, { params }).catch(e => {
-          console.error('[Clinics API Error]', e);
-          return { data: [] };
-        }),
-        axios.get(`${API_BASE_URL}/stats`, { params }).catch(e => {
-          console.error('[Stats API Error]', e);
-          return { data: { total: 0, verified: 0, unverified: 0, contacted: 0, pending: 0 } };
-        }),
-        axios.get(`${API_BASE_URL}/logs`).catch(e => {
-          console.error('[Logs API Error]', e);
-          return { data: [] };
-        })
-      ]);
-      
-      // Ensure data is arrays/objects
-      setClinics(Array.isArray(clinicsRes.data) ? clinicsRes.data : []);
-      setStats(statsRes.data || { total: 0, verified: 0, unverified: 0, contacted: 0, pending: 0 });
-      setLogs(Array.isArray(logsRes.data) ? logsRes.data : []);
-    } catch (e) {
-      console.error('[Fetch Error]', e);
-    }
+  /* handlers */
+  const onExtracted = (emails, sid) => {
+    setEmailData(emails);
+    setSessionId(sid);
+    setSelectedEmails(emails?.valid?.map(e => e.email) || []);
+    setStep('review');
+  };
+  const onSelChange = emails => setSelectedEmails(emails);
+  const onSendStart = payload => { setSendPayload(payload); setStep('send'); };
+  const onComplete  = () => {};
+  const onReset     = () => {
+    setEmailData(null); setSessionId(null);
+    setSelectedEmails([]); setSendPayload(null);
+    setStep('upload');
   };
 
-  useEffect(() => {
-    fetchData(activeFilter);
-    const interval = setInterval(() => fetchData(activeFilter), 3000);
-    return () => clearInterval(interval);
-  }, [activeFilter]);
-
-  const handleSearch = async (query) => {
-    setLoading(true);
-    setMessage('');
-    try {
-      const response = await axios.post(`${API_BASE_URL}/search`, {
-        ...query,
-        template: globalTemplate
-      }, { timeout: 10000 });
-      
-      // Set the filter to show results from this search
-      setActiveFilter({ 
-        city: query.city, 
-        country: query.country, 
-        specialization: query.specialization 
-      });
-      
-      setMessage(`✅ DISCOVERY INITIATED: ${query.specialization.toUpperCase()} in ${query.city.toUpperCase()}. Scanning Google Maps... Please wait.`);
-      
-      // Auto-refresh data after a short delay to show initial results
-      setTimeout(() => {
-        fetchData({ 
-          city: query.city, 
-          specialization: query.specialization 
-        });
-      }, 3000);
-      
-      // Clear message after delay
-      setTimeout(() => setMessage(''), 12000);
-    } catch (e) {
-      console.error('[Search Error]', e);
-      setMessage(`❌ ERROR: ${getErrorMessage(e) || 'Failed to initiate discovery. Check backend connection.'}`);
-      setTimeout(() => setMessage(''), 8000);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAnalyze = (clinic) => {
-    setSelectedClinic(clinic);
-  };
-
-  const handleSaveTemplate = async (val) => {
-    try {
-      setGlobalTemplate(val);
-      localStorage.setItem('outreach_template', val);
-      
-      const res = await axios.post(`${API_BASE_URL}/template`, { template: val });
-      setMessage(res.data.message || '✅ GLOBAL OUTREACH PROTOCOL SAVED SUCCESSFULLY');
-    } catch (e) {
-      console.error('Failed to save template to backend:', e);
-      setMessage('❌ FAILED TO SAVE PROTOCOL TO DATABASE: ' + getErrorMessage(e));
-    } finally {
-      setTimeout(() => setMessage(''), 5000);
-    }
-  };
-
-  const handleStopOutreach = () => {
-    stopOutreachRef.current = true;
-    setMessage('🛑 Stopping Outreach Agent... Please wait.');
-  };
-
-  const handleOutreach = async () => {
-    const clinicsWithEmail = clinics.filter(c => c.email && c.email.trim() !== '');
-    
-    if (!clinicsWithEmail.length) {
-      setMessage('⚠️ WARNING: No leads with email addresses found.');
-      setTimeout(() => setMessage(''), 5000);
-      return;
-    }
-    
-    setSending(true);
-    stopOutreachRef.current = false; // Reset stop flag
-    let successCount = 0;
-    let failCount = 0;
-    
-    // Loop through each clinic and send email individually
-    for (let i = 0; i < clinicsWithEmail.length; i++) {
-      if (stopOutreachRef.current) {
-        setMessage(`🛑 OUTREACH STOPPED BY USER: Sent: ${successCount}, Failed: ${failCount}`);
-        setSending(false);
-        setTimeout(() => setMessage(''), 10000);
-        return;
-      }
-      
-      const clinic = clinicsWithEmail[i];
-      const progressMessage = `⏳ Sending email ${i + 1}/${clinicsWithEmail.length} to ${clinic.name}...`;
-      setMessage(progressMessage);
-      
-      try {
-        const res = await axios.post(`${API_BASE_URL}/outreach`, {
-          clinic_names: [clinic.name],
-          template: globalTemplate
-        });
-        
-        if (res.data.contacted > 0) {
-          successCount++;
-        } else {
-          failCount++;
-        }
-      } catch (e) {
-        console.error(`Error sending to ${clinic.name}:`, e);
-        failCount++;
-      }
-      
-      // Update local state to show "Contacted" immediately in the UI grid
-      setClinics(prev => prev.map(c => {
-        if (c.name === clinic.name) {
-          return { ...c, outreach_status: 'Contacted' };
-        }
-        return c;
-      }));
-    }
-    
-    setMessage(`✅ SUCCESS: Bulk email outreach completed. Sent: ${successCount}, Failed: ${failCount}`);
-    setSending(false);
-    
-    // Refresh database sync after a short delay
-    setTimeout(() => {
-      fetchData(activeFilter);
-    }, 2000);
-    
-    setTimeout(() => setMessage(''), 10000);
-  };
-
-  const handleExport = () => {
-    if (!clinics.length) return;
-    const headers = ['Name', 'Category', 'City', 'Country', 'Email', 'Phone', 'Website', 'Address'];
-    const csvRows = clinics.map(c =>
-      [c.name, c.specialization, c.city, c.country, c.email, c.phone, c.website, c.address]
-        .map(v => {
-          const val = v === null || v === undefined ? '' : v;
-          return `"${val.toString().replace(/"/g, '""')}"`;
-        })
-        .join(',')
-    );
-    
-    // Add UTF-8 BOM for Excel compatibility
-    const csvContent = "\uFEFF" + headers.join(',') + '\n' + csvRows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `leadflow_leads_export_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleClearAll = async () => {
-    try {
-      const res = await axios.delete(`${API_BASE_URL}/clinics`);
-      setMessage(`🗑️ ${res.data.message || 'All leads deleted successfully.'}`);
-      setClinics([]);
-      setStats({ total: 0, verified: 0, unverified: 0, contacted: 0, pending: 0 });
-      setTimeout(() => setMessage(''), 5000);
-    } catch (e) {
-      console.error(e);
-      setMessage('❌ Failed to clear database: ' + getErrorMessage(e));
-      setTimeout(() => setMessage(''), 5000);
-    }
-  };
-
-  const handleDeleteClinic = async (clinic) => {
-    try {
-      const res = await axios.delete(`${API_BASE_URL}/clinics`, {
-        params: { name: clinic.name, city: clinic.city }
-      });
-      setMessage(`🗑️ ${res.data.message || 'Clinic deleted successfully.'}`);
-      setClinics(prev => prev.filter(c => !(c.name === clinic.name && c.city === clinic.city)));
-      
-      // Update stats locally
-      setStats(prev => {
-        const wasVerified = clinic.status === 'Verified';
-        const wasContacted = clinic.outreach_status === 'Contacted';
-        return {
-          ...prev,
-          total: Math.max(0, prev.total - 1),
-          verified: wasVerified ? Math.max(0, prev.verified - 1) : prev.verified,
-          unverified: !wasVerified ? Math.max(0, prev.unverified - 1) : prev.unverified,
-          contacted: wasContacted ? Math.max(0, prev.contacted - 1) : prev.contacted,
-          pending: !wasContacted && clinic.email ? Math.max(0, prev.pending - 1) : prev.pending
-        };
-      });
-      setTimeout(() => setMessage(''), 5000);
-    } catch (e) {
-      console.error(e);
-      setMessage('❌ Failed to delete clinic: ' + getErrorMessage(e));
-      setTimeout(() => setMessage(''), 5000);
-    }
-  };
-
-  const statsData = [
-    { title: 'Total Leads', value: stats.total, icon: '🏢', color: 'blue' },
-    { title: 'Leads Verified', value: stats.verified, icon: '✅', color: 'blue' },
-    { title: 'Processing', value: stats.unverified, icon: '⏳', color: 'orange' },
-    { title: 'Success Rate', value: stats.total > 0 ? `${Math.round((stats.verified / stats.total) * 100)}%` : '0%', icon: '📊', color: 'blue' },
-  ];
-
-  // Logic for Archive view (Contacted only)
-  const archivedClinics = clinics.filter(c => c.outreach_status === 'Contacted');
+  const canNext = step === 'upload' ? !!emailData : step === 'review' ? selectedEmails.length > 0 : false;
+  const goNext  = () => { if (step === 'upload') setStep('review'); else if (step === 'review') setStep('compose'); };
+  const goBack  = () => { if (step === 'review') setStep('upload'); else if (step === 'compose') setStep('review'); else if (step === 'send') setStep('compose'); };
 
   return (
-    <div style={{ minHeight: '100vh', position: 'relative' }}>
-
-      {/* Grid Overlay */}
-      <div style={{ 
-        position: 'fixed', inset: 0, 
-        backgroundImage: 'radial-gradient(rgba(46, 119, 174, 0.05) 1px, transparent 1px)', 
-        backgroundSize: '40px 40px', pointerEvents: 'none', zIndex: 0 
+    <div style={{ minHeight: '100vh', background: '#0a0a0a' }}>
+      <Toaster position="top-right" toastOptions={{
+        style: { background: '#111', color: '#fafafa', border: '1px solid rgba(255,255,255,0.08)', fontFamily: 'Inter, sans-serif', fontSize: 13, borderRadius: 10 },
+        success: { iconTheme: { primary: '#22c55e', secondary: '#fff' } },
+        error:   { iconTheme: { primary: '#ef4444', secondary: '#fff' } },
       }} />
 
-      {/* Loading overlay */}
-      {loading && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 1000, display: 'flex',
-          alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(10,14,20,0.95)', backdropFilter: 'blur(30px)'
-        }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{
-              width: '100px', height: '100px', borderRadius: '50%',
-              border: '2px solid rgba(46,119,174,0.1)',
-              borderTop: '2px solid #2E77AE',
-              animation: 'spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite',
-              margin: '0 auto 32px',
-              boxShadow: '0 0 30px rgba(46, 119, 174, 0.2)'
-            }} />
-            <h3 style={{ fontSize: '14px', fontWeight: 900, color: '#fff', letterSpacing: '8px', textTransform: 'uppercase' }}>
-              Initializing Grid
-            </h3>
-          </div>
-        </div>
-      )}
+      <Navbar currentPage={page} onNavigate={p => { setPage(p); }} />
 
-      <div style={{ position: 'relative', zIndex: 1 }}>
-        <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
+      <main style={{ maxWidth: 1100, margin: '0 auto', padding: '36px 24px' }}>
+        <AnimatePresence mode="wait">
 
-        <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '40px' }}>
-
-          <div style={{ marginBottom: '60px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-            <div>
-              <h1 style={{ fontSize: '64px', fontWeight: 900, color: '#fff', letterSpacing: '-3px', lineHeight: 0.9 }}>
-                Mission <span style={{ color: '#2E77AE' }}>{activeTab === 'archive' ? 'Archive' : activeTab === 'discovery' ? 'Discovery' : 'Control'}.</span>
-              </h1>
-              <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginTop: '16px', textTransform: 'uppercase', letterSpacing: '4px' }}>
-                Orbital Intelligence & Outreach Grid
-              </p>
-            </div>
-          </div>
-
-          {isVercelMisconfigured && (
-            <div className="glass-panel" style={{
-              padding: '20px 32px',
-              marginBottom: '32px',
-              background: 'rgba(239, 68, 68, 0.08)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              color: '#ffb4ab',
-              borderRadius: '12px'
-            }}>
-              <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px', color: '#ffb4ab' }}>
-                ⚠️ Vercel Connection Setup Required
-              </h4>
-              <p style={{ margin: '10px 0 0 0', fontSize: '12px', lineHeight: '1.6', color: 'rgba(255,255,255,0.7)', textTransform: 'none', letterSpacing: 'normal' }}>
-                You are accessing LeadFlow AI on Vercel, but the frontend is trying to query the Vercel server instead of your Render backend.
-              </p>
-              <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px', fontSize: '11.5px', lineHeight: '1.6', color: 'rgba(255,255,255,0.8)', textTransform: 'none', letterSpacing: 'normal' }}>
-                <li>
-                  <strong>Option A (Recommended)</strong>: Open the app directly using your <strong>Render URL</strong> (e.g. <code>https://your-service.onrender.com</code>). Render hosts both the backend and frontend together, so it works perfectly.
-                </li>
-                <li style={{ marginTop: '6px' }}>
-                  <strong>Option B</strong>: In your Vercel Dashboard, go to <strong>Project Settings &gt; Environment Variables</strong>, add <code>VITE_API_BASE_URL</code> pointing to your Render API (e.g. <code>https://your-service.onrender.com/api</code>), and redeploy.
-                </li>
-              </ul>
-            </div>
+          {/* ── History page ─────────────────────────── */}
+          {page === 'history' && (
+            <motion.div key="history" {...PV}>
+              <div style={{ marginBottom: 28 }}>
+                <h1 style={{ fontSize: 28, fontWeight: 900, letterSpacing: '-0.8px', color: '#fafafa', lineHeight: 1.1 }}>
+                  Campaign <span className="grad">History</span>
+                </h1>
+                <p style={{ color: '#52525b', fontSize: 13.5, marginTop: 7 }}>All past campaigns — click any row to expand recipients.</p>
+              </div>
+              <CampaignHistory />
+            </motion.div>
           )}
 
-          {message && (
-            <div className="glass-panel" style={{
-              padding: '20px 32px', marginBottom: '32px',
-              background: message.includes('✅') ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)',
-              border: `1px solid ${message.includes('✅') ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
-              color: message.includes('✅') ? '#4ade80' : '#ffb4ab',
-              fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px'
-            }}>
-              {message}
-            </div>
-          )}
+          {/* ── Upload workflow ───────────────────────── */}
+          {page === 'upload' && (
+            <motion.div key="workflow" {...PV}>
 
-          {activeTab === 'dashboard' && (
-            <>
-              {/* Stats */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '24px', marginBottom: '40px' }}>
-                {statsData.map((s, i) => <StatsCard key={i} {...s} index={i} />)}
+              {/* Page title */}
+              <div style={{ marginBottom: 4 }}>
+                <h1 style={{ fontSize: 30, fontWeight: 900, letterSpacing: '-1px', color: '#fafafa', lineHeight: 1.1 }}>
+                  AI <span className="grad">Bulk Email</span>
+                </h1>
+                <p style={{ color: '#52525b', fontSize: 13, marginTop: 6 }}>
+                  Upload docs → AI extracts emails → Compose & send
+                </p>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: '40px', alignItems: 'start' }}>
-                <div style={{ minWidth: 0 }}>
-                  <SearchForm onSearch={handleSearch} isLoading={loading || stats.scraper_running} />
+              {/* Step bar */}
+              <StepBar current={step} />
 
-                  <div className="glass-panel" style={{
-                    padding: '32px', border: '1px solid rgba(46,119,174,0.15)'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
-                      <div style={{ fontSize: '28px' }}>🤖</div>
-                      <div>
-                        <h3 style={{ color: '#fff', fontSize: '14px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px' }}>AI Outreach Agent</h3>
-                        <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', fontWeight: 600 }}>Protocol Uptime: 99.9% // Secure SMTP Active</p>
-                      </div>
-                    </div>
-                    
-                    <button 
-                      onClick={() => {
-                        setMessage('🔍 Checking backend health...');
-                        axios.get(`${API_BASE_URL}/health`)
-                          .then(res => {
-                            setMessage(`✅ BACKEND HEALTHY: Database ${res.data.database}, ${res.data.clinics_count} leads loaded`);
-                            setTimeout(() => setMessage(''), 5000);
-                          })
-                          .catch(e => {
-                            setMessage(`❌ BACKEND ERROR: ${getErrorMessage(e)}`);
-                            setTimeout(() => setMessage(''), 5000);
-                          });
-                      }}
-                      className="glow-btn"
-                      style={{
-                        width: '100%', padding: '14px', 
-                        background: 'rgba(46,119,174,0.1)', border: '1px solid rgba(46,119,174,0.2)',
-                        borderRadius: '10px', color: '#2E77AE', fontSize: '11px',
-                        fontWeight: 800, cursor: 'pointer', transition: 'all 0.3s',
-                        textTransform: 'uppercase', letterSpacing: '2px'
-                      }}
-                    >
-                      Check Backend Health
-                    </button>
-                  </div>
-                </div>
-
-                <AgentActivityLog logs={logs} clinicCount={stats.total} verifiedCount={stats.verified} />
-
-              </div>
-
-              <ClinicTable 
-                clinics={clinics} 
-                onExport={handleExport} 
-                onAnalyze={handleAnalyze} 
-                onOutreach={handleOutreach}
-                isSending={sending}
-                onClearAll={handleClearAll}
-                onDelete={handleDeleteClinic}
-              />
-            </>
-          )}
-
-          {activeTab === 'email_manage' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>
-              
-              {/* Outreach Status Cards & Actions */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '24px' }}>
-                
-                {/* Total Emailed Card */}
-                <div className="glass-panel" style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '20px' }}>
-                  <div style={{ fontSize: '32px' }}>✉️</div>
-                  <div>
-                    <h4 style={{ color: 'rgba(255,255,255,0.4)', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>Total Emailed</h4>
-                    <p style={{ color: '#fff', fontSize: '24px', fontWeight: 900, marginTop: '4px' }}>{stats.contacted || 0}</p>
-                  </div>
-                </div>
-
-                {/* Pending Outreach Card */}
-                <div className="glass-panel" style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '20px' }}>
-                  <div style={{ fontSize: '32px' }}>⏳</div>
-                  <div>
-                    <h4 style={{ color: 'rgba(255,255,255,0.4)', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>Pending Outreach</h4>
-                    <p style={{ color: '#FF8E2B', fontSize: '24px', fontWeight: 900, marginTop: '4px' }}>{stats.pending || 0}</p>
-                  </div>
-                </div>
-
-                {/* Stop Agent Card/Action */}
-                {sending && (
-                  <div className="glass-panel" style={{ 
-                    padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
-                    border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.05)'
-                  }}>
-                    <button 
-                      onClick={handleStopOutreach}
-                      className="glow-btn"
-                      style={{
-                        padding: '12px 24px', background: '#ef4444', border: 'none', borderRadius: '10px',
-                        color: '#fff', fontWeight: 800, fontSize: '12px', cursor: 'pointer',
-                        textTransform: 'uppercase', letterSpacing: '1px', boxShadow: '0 0 15px rgba(239,68,68,0.4)',
-                        animation: 'pulse 1.5s infinite'
-                      }}
-                    >
-                      🛑 STOP OUTREACH AGENT
-                    </button>
-                  </div>
+              {/* Stats (shown after extraction, not on send) */}
+              <AnimatePresence>
+                {emailData && step !== 'send' && (
+                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                    style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 24 }}>
+                    <StatsCard icon={Users} label="Valid Emails"  value={stats.valid}   color="success" delay={0} />
+                    <StatsCard icon={Copy}  label="Duplicates"    value={stats.dupes}   color="warning" delay={0.04} />
+                    <StatsCard icon={Mail}  label="Invalid"       value={stats.invalid} color="danger"  delay={0.08} />
+                    <StatsCard icon={CheckCircle2} label="Selected" value={stats.sel}  color="primary" delay={0.12} />
+                  </motion.div>
                 )}
-              </div>
+              </AnimatePresence>
 
-              {/* Two Column Layout for template editing and logs */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px', alignItems: 'start' }}>
-                
-                {/* Template Editor */}
-                <TemplateEditor template={globalTemplate} onSave={handleSaveTemplate} />
-                
-                {/* Sent List Table & Stats */}
-                <div>
-                  <div className="glass-panel" style={{ padding: '32px', marginBottom: '24px', border: '1px solid rgba(46,119,174,0.2)' }}>
-                    <h3 style={{ color: '#fff', fontSize: '16px', fontWeight: 900, marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px' }}>Outreach Logs</h3>
-                    <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1.5px' }}>
-                      Verified B2B lead nodes contacted successfully
-                    </p>
-                  </div>
-                  <ClinicTable 
-                    clinics={archivedClinics} 
-                    onExport={handleExport} 
-                    onAnalyze={handleAnalyze} 
-                    onOutreach={handleOutreach}
-                    isSending={sending}
-                    onClearAll={handleClearAll}
-                    onDelete={handleDeleteClinic}
-                  />
+              {/* Content area */}
+              <AnimatePresence mode="wait">
+
+                {/* Step 1 — Upload */}
+                {step === 'upload' && (
+                  <motion.div key="upload" {...PV}>
+                    <div className="glass" style={{ padding: 26 }}>
+                      <SectionHead icon={Zap} title="Upload Documents" sub="The AI RAG pipeline will extract all email addresses automatically" color="#6366f1" />
+                      <FileUploader onEmailsExtracted={onExtracted} onSessionCreated={setSessionId} />
+                    </div>
+
+                    {/* How it works strip */}
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25 }}
+                      style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1 }}>
+                      {[
+                        { n: '01', t: 'Upload Files', d: 'PDF, DOCX, TXT, CSV, XLSX', c: '#6366f1' },
+                        { n: '02', t: 'RAG Pipeline', d: 'Chunk → Embed → Index', c: '#06b6d4' },
+                        { n: '03', t: 'Email Extract', d: 'Validate & deduplicate', c: '#22c55e' },
+                        { n: '04', t: 'Bulk Send', d: 'Sequential with live SSE', c: '#f59e0b' },
+                      ].map((s, i) => (
+                        <div key={s.n} style={{
+                          padding: '14px 16px',
+                          background: i === 0 ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.015)',
+                          borderTop: '1px solid rgba(255,255,255,0.04)',
+                          borderBottom: '1px solid rgba(255,255,255,0.04)',
+                          borderLeft: i === 0 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                          borderRight: '1px solid rgba(255,255,255,0.04)',
+                          borderRadius: i === 0 ? '10px 0 0 10px' : i === 3 ? '0 10px 10px 0' : 0,
+                        }}>
+                          <span style={{ fontSize: 10, fontWeight: 900, color: s.c, display: 'block', marginBottom: 5, fontFamily: 'JetBrains Mono, monospace' }}>{s.n}</span>
+                          <span style={{ fontSize: 12.5, fontWeight: 700, color: '#d4d4d8', display: 'block', marginBottom: 2 }}>{s.t}</span>
+                          <span style={{ fontSize: 11.5, color: '#52525b' }}>{s.d}</span>
+                        </div>
+                      ))}
+                    </motion.div>
+
+                    {/* Continue button */}
+                    {emailData && (
+                      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+                        <button className="btn btn-primary" onClick={goNext} style={{ padding: '10px 22px', fontSize: 14 }}>
+                          Review {stats.valid} Emails <ArrowRight size={15} />
+                        </button>
+                      </motion.div>
+                    )}
+                  </motion.div>
+                )}
+
+                {/* Step 2 — Review */}
+                {step === 'review' && (
+                  <motion.div key="review" {...PV}>
+                    <div className="glass" style={{ padding: 26 }}>
+                      <SectionHead icon={Mail} title="Review Extracted Emails" sub={`Select recipients for your campaign — ${stats.sel} selected`} color="#06b6d4" />
+                      <EmailTable emailData={emailData} onSelectionChange={onSelChange} />
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Step 3 — Compose */}
+                {step === 'compose' && (
+                  <motion.div key="compose" {...PV}>
+                    <div className="glass" style={{ padding: 26 }}>
+                      <SectionHead icon={FileText} title="Compose Email" sub={`Sending to ${selectedEmails.length} recipient${selectedEmails.length !== 1 ? 's' : ''}`} color="#818cf8" />
+                      <EmailComposer recipients={selectedEmails} onSendStart={onSendStart} />
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Step 4 — Send */}
+                {step === 'send' && sendPayload && (
+                  <motion.div key="send" {...PV}>
+                    <div className="glass" style={{ padding: 26 }}>
+                      <SectionHead icon={BarChart3} title="Live Campaign Progress" sub="Emails are sent sequentially with real-time updates" color="#22c55e" />
+                      <SendProgress sendPayload={sendPayload} onComplete={onComplete} onReset={onReset} />
+                    </div>
+                  </motion.div>
+                )}
+
+              </AnimatePresence>
+
+              {/* Navigation */}
+              {step !== 'send' && step !== 'upload' && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 18 }}>
+                  <button className="btn btn-ghost" onClick={goBack} style={{ fontSize: 13 }}>
+                    <ArrowLeft size={14} /> Back
+                  </button>
+                  {step === 'review' && canNext && (
+                    <button className="btn btn-primary" onClick={goNext} style={{ fontSize: 13 }}>
+                      Continue to Compose <ArrowRight size={14} />
+                    </button>
+                  )}
                 </div>
-              </div>
-            </div>
+              )}
+
+            </motion.div>
           )}
 
-
-          <footer style={{
-            marginTop: '100px', padding: '40px 0',
-            borderTop: '1px solid rgba(255,255,255,0.05)',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-          }}>
-            <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.15)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '4px' }}>
-              © 2026 LEADFLOW AI // MISSION CONTROL UNIT
-            </span>
-            <div style={{ display: 'flex', gap: '32px' }}>
-              {['PROTOCOL', 'ACCESS', 'SECURITY'].map(l => (
-                <a key={l} href="#" style={{ fontSize: '10px', color: 'rgba(255,255,255,0.15)', textDecoration: 'none', textTransform: 'uppercase', letterSpacing: '2px', fontWeight: 800 }}>{l}</a>
-              ))}
-            </div>
-          </footer>
-        </main>
-      </div>
-
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        input::placeholder { color: rgba(255,255,255,0.1); }
-      `}</style>
+        </AnimatePresence>
+      </main>
     </div>
   );
 }

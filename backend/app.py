@@ -1,1485 +1,538 @@
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
-# No psycopg2 needed, using requests for Supabase REST API
+"""
+AI Bulk Email Sender — FastAPI Backend
+Handles document upload → RAG pipeline → email extraction → bulk send.
+"""
+
+import asyncio
+import io
+import json
 import os
-import datetime
+import sys
 import time
 import threading
-import smtplib
-import traceback
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import uuid
+import csv
+import datetime
+from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional
+
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from dotenv import load_dotenv
-from scraper import ClinicScraper
-from fill_emails_max import find_email as extract_email_max
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import requests
-import sys
-from bs4 import BeautifulSoup
-import urllib.parse
 
-# Force IPv4 to prevent connection hangs/timeouts on Render due to IPv6
-try:
-    import socket
-    import urllib3.util.connection as urllib3_cn
-    urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
-except Exception:
-    pass
-
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
-if hasattr(sys.stderr, 'reconfigure'):
-    sys.stderr.reconfigure(encoding='utf-8')
-
-# Load .env file from the backend directory specifically
+# ── Load environment ─────────────────────────────────────────
 backend_dir = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(dotenv_path=os.path.join(backend_dir, '.env'))
+load_dotenv(dotenv_path=os.path.join(backend_dir, ".env"))
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+# ── RAG imports ──────────────────────────────────────────────
+from rag.document_loader import load_document
+from rag.chunker import chunk_documents
+from rag.embedder import embed_texts, embed_query
+from rag.vector_store import VectorStore
+from rag.email_extractor import extract_from_vector_store, extract_emails_from_text, validate_and_deduplicate
+
+# ── Email engine imports ──────────────────────────────────────
+from email_engine.sender import SendSession, run_send_session
+from email_engine.validator import is_valid_email
+
+# ── Database imports ──────────────────────────────────────────
+from db.database import (
+    init_db, create_campaign, insert_recipients,
+    update_recipient_status, complete_campaign,
+    list_campaigns, get_campaign, get_recipients, delete_campaign
+)
+
+# ── Logging ──────────────────────────────────────────────────
+def log(msg: str, level: str = "INFO"):
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] [{level}] {msg}", flush=True)
 
 
-# Set up static folder pointing to the built React frontend dist folder
-dist_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'frontend', 'dist')
+# ── App lifecycle ─────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    log("Initializing database...")
+    await init_db()
+    log("Database ready.")
+    yield
+    log("Shutting down.")
 
-app = Flask(__name__, static_folder=dist_folder, static_url_path='/')
-CORS(app)
-app.json.compact = False  # Return formatted/pretty-printed JSON by default
 
-# ────────────────────────────────────────────────────────────
-# LOGGING SYSTEM
-# ────────────────────────────────────────────────────────────
+app = FastAPI(
+    title="AI Bulk Email Sender",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
-def log(msg, level="INFO"):
-    """Comprehensive logging with timestamps and levels."""
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    output = f"[{timestamp}] [BACKEND] [{level}] {msg}"
-    print(output, flush=True)
-    sys.stdout.flush()  # Explicit flush for daemon threads
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# ────────────────────────────────────────────────────────────
-# SUPABASE REST API CONFIGURATION
-# ────────────────────────────────────────────────────────────
+# ── In-memory state ───────────────────────────────────────────
+# One VectorStore per upload session (session_id → VectorStore)
+vector_stores: Dict[str, VectorStore] = {}
+# Extracted emails per session
+session_emails: Dict[str, Dict] = {}
+# Active send sessions
+send_sessions: Dict[str, SendSession] = {}
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-supabase_connected = False
+# Serve React frontend if dist exists
+dist_folder = os.path.join(backend_dir, "..", "frontend", "dist")
+if os.path.isdir(dist_folder):
+    app.mount("/assets", StaticFiles(directory=os.path.join(dist_folder, "assets")), name="assets")
 
-if SUPABASE_URL and SUPABASE_KEY:
-    supabase_connected = True
-    log(f"✓ Supabase REST API configured for URL: {SUPABASE_URL}", "OK")
-else:
-    log("Supabase URL or Key not set. Running on local JSON file storage fallback.", "WARNING")
 
-def get_supabase_headers():
+# ════════════════════════════════════════════════════════════
+# PYDANTIC MODELS
+# ════════════════════════════════════════════════════════════
+
+class SmtpConfig(BaseModel):
+    host: str = "smtp.gmail.com"
+    port: int = 587
+    username: str
+    password: str
+    use_tls: bool = True
+
+
+class SendRequest(BaseModel):
+    session_id: str
+    campaign_name: str = "Untitled Campaign"
+    subject: str
+    body_html: str
+    body_text: str = ""
+    signature: str = ""
+    smtp_config: SmtpConfig
+    recipients: List[Dict[str, str]]  # [{email, name?, source?}]
+
+
+class TestEmailRequest(BaseModel):
+    to_email: str
+    subject: str
+    body_html: str
+    body_text: str = ""
+    smtp_config: SmtpConfig
+
+
+# ════════════════════════════════════════════════════════════
+# UPLOAD & RAG PIPELINE
+# ════════════════════════════════════════════════════════════
+
+@app.post("/api/upload")
+async def upload_documents(files: List[UploadFile] = File(...)):
+    """
+    Upload one or more documents.
+    Runs the full RAG pipeline and returns extracted emails.
+    """
+    session_id = str(uuid.uuid4())
+    store = VectorStore()
+    all_raw_emails = []
+    file_summaries = []
+    total_chunks = 0
+
+    log(f"Upload session {session_id}: processing {len(files)} file(s)")
+
+    for upload in files:
+        try:
+            file_bytes = await upload.read()
+            filename = upload.filename or "unknown"
+
+            log(f"  Loading: {filename} ({len(file_bytes)} bytes)")
+            pages = load_document(filename, file_bytes)
+
+            log(f"  Chunking: {filename} → {len(pages)} pages")
+            chunks = chunk_documents(pages)
+            total_chunks += len(chunks)
+
+            if chunks:
+                texts = [c["content"] for c in chunks]
+                log(f"  Embedding: {len(texts)} chunks from {filename}")
+                embeddings = embed_texts(texts)
+                store.add(chunks, embeddings)
+
+            # Also extract emails directly from raw text for recall
+            raw_from_file = extract_emails_from_text(
+                "\n".join(p["content"] for p in pages), source=filename
+            )
+            all_raw_emails.extend(raw_from_file)
+
+            file_summaries.append({
+                "filename": filename,
+                "pages": len(pages),
+                "chunks": len(chunks),
+                "size_bytes": len(file_bytes),
+            })
+
+        except Exception as e:
+            log(f"  ERROR processing {upload.filename}: {e}", "ERROR")
+            file_summaries.append({
+                "filename": upload.filename,
+                "error": str(e),
+            })
+
+    # Store the vector store for this session
+    vector_stores[session_id] = store
+
+    # Run full extraction from vector store + direct scan
+    store_result = extract_from_vector_store(store)
+
+    # Merge all raw emails and deduplicate
+    all_raw_emails.extend(store_result.get("valid", []))
+    all_raw_emails.extend(store_result.get("invalid", []))
+    all_raw_emails.extend(store_result.get("duplicates", []))
+
+    # Final deduplication pass
+    final_result = validate_and_deduplicate(all_raw_emails)
+    session_emails[session_id] = final_result
+
+    log(
+        f"Session {session_id}: extracted {final_result['stats']['valid_count']} valid emails "
+        f"from {total_chunks} chunks"
+    )
+
     return {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
+        "session_id": session_id,
+        "files": file_summaries,
+        "total_chunks": total_chunks,
+        "emails": final_result,
     }
 
-def supabase_get(table, params=None):
-    """Fetch rows from a Supabase table."""
-    if not supabase_connected:
-        return None
-    try:
-        url = f"{SUPABASE_URL}/rest/v1/{table}"
-        response = requests.get(url, headers=get_supabase_headers(), params=params, timeout=10)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            log(f"Supabase GET {table} failed ({response.status_code}): {response.text}", "WARNING")
-            return None
-    except Exception as e:
-        log(f"Supabase GET error: {e}", "WARNING")
-        return None
 
-def supabase_upsert(table, data, on_conflict=None):
-    """Upsert rows into a Supabase table."""
-    if not supabase_connected:
-        return False
-    try:
-        url = f"{SUPABASE_URL}/rest/v1/{table}"
-        headers = get_supabase_headers()
-        headers["Prefer"] = "resolution=merge-duplicates"
-        params = {}
-        if on_conflict:
-            params["on_conflict"] = on_conflict
-        response = requests.post(url, headers=headers, json=data, params=params, timeout=10)
-        if response.status_code in [200, 201]:
-            return True
-        else:
-            log(f"Supabase POST {table} failed ({response.status_code}): {response.text}", "WARNING")
-            return False
-    except Exception as e:
-        log(f"Supabase POST error: {e}", "WARNING")
-        return False
-
-def supabase_delete(table, params):
-    """Delete rows from a Supabase table based on query parameters."""
-    if not supabase_connected:
-        return False
-    try:
-        url = f"{SUPABASE_URL}/rest/v1/{table}"
-        response = requests.delete(url, headers=get_supabase_headers(), params=params, timeout=10)
-        if response.status_code in [200, 204]:
-            return True
-        else:
-            log(f"Supabase DELETE {table} failed ({response.status_code}): {response.text}", "WARNING")
-            return False
-    except Exception as e:
-        log(f"Supabase DELETE error: {e}", "WARNING")
-        return False
-
-# ────────────────────────────────────────────────────────────
-# PERSISTENT FILE STORAGE (survives restarts)
-# ────────────────────────────────────────────────────────────
-
-import json
-
-DATA_FILE = os.path.join(os.path.dirname(__file__), 'clinics_data.json')
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'settings_data.json')
-
-DEFAULT_TEMPLATE = ""
-
-def load_template(verbose=True):
-    """Load the email template from Supabase or local JSON fallback."""
-    # 1. Try Supabase
-    if supabase_connected:
-        rows = supabase_get("settings", {"key": "eq.outreach_template"})
-        if rows and len(rows) > 0:
-            if verbose:
-                log("Loaded email template from Supabase settings table", "OK")
-            return rows[0].get("value")
-                
-    # 2. Try JSON file fallback
-    try:
-        if os.path.exists(SETTINGS_FILE):
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
-                if "outreach_template" in settings:
-                    if verbose:
-                        log("Loaded email template from file storage", "OK")
-                    return settings["outreach_template"]
-    except Exception as e:
-        if verbose:
-            log(f"Could not load settings file: {e}", "WARNING")
-            
-    # 3. Default fallback
-    if verbose:
-        log("Using default fallback email template", "INFO")
-    return DEFAULT_TEMPLATE
-
-def save_template(template_content):
-    """Save the email template to Supabase and local JSON fallback."""
-    # 1. Try Supabase
-    db_success = False
-    if supabase_connected:
-        db_success = supabase_upsert("settings", [{"key": "outreach_template", "value": template_content}])
-        if db_success:
-            log("Saved email template to Supabase successfully", "OK")
-            
-    # 2. Try JSON file
-    try:
-        settings = {}
-        if os.path.exists(SETTINGS_FILE):
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                try:
-                    settings = json.load(f)
-                except Exception:
-                    pass
-        settings["outreach_template"] = template_content
-        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(settings, f, ensure_ascii=False, indent=2)
-        log("Saved email template to file storage successfully", "OK")
-        return True
-    except Exception as e:
-        log(f"Could not save settings file: {e}", "WARNING")
-        return db_success
-
-def load_data(verbose=True):
-    """Load clinics from JSON file."""
-    try:
-        if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                if verbose:
-                    log(f"Loaded {len(data)} clinics from file storage", "OK")
-                return data
-    except Exception as e:
-        if verbose:
-            log(f"Could not load data file: {e}", "WARNING")
-    return []
-
-def save_data():
-    """Save clinics to JSON file."""
-    try:
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(live_db, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        log(f"Could not save data file: {e}", "WARNING")
-
-live_db = load_data()   # Persistent real-time data
-activity_logs = []
-scraper_lock = threading.Lock()
+@app.get("/api/session/{session_id}/emails")
+async def get_session_emails(session_id: str):
+    """Get extracted emails for a session."""
+    if session_id not in session_emails:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session_emails[session_id]
 
 
-def add_log(msg, content=None):
-    """Add entry to activity log."""
-    log_entry = {
-        "id": len(activity_logs),
-        "message": msg,
-        "content": content,
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    }
-    activity_logs.append(log_entry)
-    log(f"ACTIVITY: {msg}")
-    
-    # Keep only last 100 logs in memory
-    if len(activity_logs) > 100:
-        activity_logs.pop(0)
+@app.delete("/api/session/{session_id}")
+async def delete_session(session_id: str):
+    """Clean up a session's vector store and emails."""
+    vector_stores.pop(session_id, None)
+    session_emails.pop(session_id, None)
+    return {"message": "Session deleted"}
 
-def is_duplicate_clinic(clinic_data, exclude_name=None, check_supabase=True):
+
+# ════════════════════════════════════════════════════════════
+# EMAIL SENDING
+# ════════════════════════════════════════════════════════════
+
+@app.post("/api/send")
+async def start_send(request: SendRequest, background_tasks: BackgroundTasks):
     """
-    Check if a clinic is a duplicate in database or memory.
-    A clinic is a duplicate if name, website, phone, or email is already present.
-    Website, phone, and email must not be empty strings.
+    Start a sequential bulk email send session.
+    Returns a send_session_id for SSE progress streaming.
     """
-    global live_db
-    import re
-    
-    name = clinic_data.get("name", "").strip().lower()
-    website = clinic_data.get("website", "").strip().lower()
-    phone = clinic_data.get("phone", "").strip().lower()
-    email = clinic_data.get("email", "").strip().lower()
-    
-    GENERIC_DOMAINS = [
-        'data.ai', 'google.com', 'yelp.com', 'yelp.co', 'tripadvisor.com',
-        'facebook.com', 'linkedin.com', 'instagram.com', 'twitter.com',
-        'yellowpages.com', 'yell.com', 'cylex.com', 'hotfrog.com',
-        'businesses.com', 'directory.', 'crunchbase.com', 'clutch.co',
-        'g2.com', 'trustpilot.com', 'zoominfo.com',
-    ]
-    
-    def clean_web(url):
-        if not url:
-            return ""
-        return url.replace("https://", "").replace("http://", "").replace("www.", "").rstrip("/")
+    send_session_id = str(uuid.uuid4())
+    session = SendSession(send_session_id)
 
-    web_clean = clean_web(website)
-    
-    # Check memory (live_db)
-    for c in live_db:
-        if exclude_name and c["name"].strip().lower() == exclude_name.strip().lower():
-            continue
-        
-        # Name duplicate
-        if c["name"].strip().lower() == name:
-            log(f"Duplicate found by name: {name}", "INFO")
-            return True
-            
-        # Website duplicate — skip check for known directory/aggregator sites
-        # (Google Maps sometimes returns directory URLs for multiple businesses)
-        if web_clean and c.get("website"):
-            c_web = clean_web(c["website"])
-            # Only flag as duplicate if the website is specific (not a generic directory)
-            if c_web == web_clean and not any(gd in web_clean for gd in GENERIC_DOMAINS):
-                log(f"Duplicate found by website: {website}", "INFO")
-                return True
-                
-        # Phone duplicate
-        if phone and c.get("phone"):
-            c_phone = c["phone"].strip().replace("+", "").replace(" ", "").replace("-", "").strip().lower()
-            phone_clean = phone.replace("+", "").replace(" ", "").replace("-", "").strip().lower()
-            if c_phone == phone_clean:
-                log(f"Duplicate found by phone: {phone}", "INFO")
-                return True
-                
-        # Email duplicate
-        if email and c.get("email"):
-            c_email = c["email"].strip().lower()
-            if c_email == email:
-                log(f"Duplicate found by email: {email}", "INFO")
-                return True
-                
-    # Check Supabase
-    if check_supabase and supabase_connected:
-        try:
-            or_parts = [f"name.ilike.{name}"]
-            if phone:
-                or_parts.append(f"phone.eq.{phone}")
-            if web_clean and not any(gd in web_clean for gd in GENERIC_DOMAINS):
-                or_parts.append(f"website.ilike.%{web_clean}%")
-            if email:
-                or_parts.append(f"email.ilike.{email}")
-                
-            params = {"or": f"({','.join(or_parts)})"}
-            if exclude_name:
-                params["name"] = f"neq.{exclude_name}"
-                
-            rows = supabase_get("clinics", params)
-            if rows and len(rows) > 0:
-                log(f"Duplicate found in Supabase: {rows[0].get('name')}", "INFO")
-                return True
-        except Exception as e:
-            log(f"Supabase duplicate check failed: {e}", "WARNING")
-            
-    return False
+    session.recipients = request.recipients
+    session.subject = request.subject
+    session.body_html = request.body_html
+    session.body_text = request.body_text or ""
+    session.signature = request.signature
+    session.smtp_config = request.smtp_config.model_dump()
 
-def auto_send(clinic, template=None):
-    """Send automated email to clinic using SMTP."""
+    loop = asyncio.get_event_loop()
+    session.set_loop(loop)
+
+    send_sessions[send_session_id] = session
+
+    # Save campaign to DB
     try:
-        clinic_name = clinic.get("name", "Clinic")
-        recipient_email = clinic.get("email", "").strip()
-        
-        if not recipient_email:
-            msg = f"No email address for {clinic_name}"
-            log(f"OUTREACH: {msg}", "WARNING")
-            return False, msg
-            
-        log(f"OUTREACH: Attempting to contact {clinic_name} at {recipient_email}", "INFO")
-        
-        # Parse template
-        subject = "Strategic Partnership Inquiry"
-        body = template or ""
-        
-        if template:
-            # If the template starts with "Subject:", extract it
-            if template.strip().lower().startswith("subject:"):
-                lines = template.split('\n', 1)
-                subject_line = lines[0]
-                subject = subject_line.replace("Subject:", "").replace("subject:", "").strip()
-                if len(lines) > 1:
-                    body = lines[1].strip()
-            
-            # Replace placeholder variants with actual name
-            for placeholder in ["[Clinic Name]", "[Business Name]", "[Company Name]", "[Lead Name]", "[Name]"]:
-                subject = subject.replace(placeholder, clinic_name)
-                body = body.replace(placeholder, clinic_name)
-        else:
-            # Default fallback template
-            subject = f"Strategic Partnership Inquiry | {clinic_name}"
-            body = (
-                f"Dear Team,\n\n"
-                f"I hope this message finds you well. I am reaching out to {clinic_name} regarding a collaboration opportunity.\n\n"
-                f"We would love to discuss how we can support your business.\n\n"
-                f"Best regards,\nHimanshu Shakya"
+        campaign_id = await create_campaign({
+            "name": request.campaign_name,
+            "subject": request.subject,
+            "body_html": request.body_html,
+            "body_text": request.body_text,
+            "signature": request.signature,
+            "smtp_host": request.smtp_config.host,
+            "smtp_port": request.smtp_config.port,
+            "smtp_username": request.smtp_config.username,
+            "total_recipients": len(request.recipients),
+        })
+        await insert_recipients(campaign_id, request.recipients)
+        session.campaign_id = campaign_id
+    except Exception as e:
+        log(f"DB error saving campaign: {e}", "WARNING")
+        session.campaign_id = None
+
+    # Run sending in background thread (non-blocking)
+    def _run():
+        run_send_session(session)
+        # Update DB after completion
+        if hasattr(session, "campaign_id") and session.campaign_id:
+            asyncio.run_coroutine_threadsafe(
+                complete_campaign(
+                    session.campaign_id,
+                    session.sent_count,
+                    session.failed_count,
+                    session.status,
+                ),
+                loop,
             )
-            
-        # Try Google Apps Script HTTP Relay if configured
-        apps_script_url = os.getenv("APPS_SCRIPT_URL")
-        if apps_script_url:
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    return {
+        "send_session_id": send_session_id,
+        "total": len(request.recipients),
+        "message": "Send session started",
+    }
+
+
+@app.get("/api/send/{send_session_id}/stream")
+async def stream_send_progress(send_session_id: str):
+    """
+    SSE endpoint that streams real-time send progress events.
+    """
+    session = send_sessions.get(send_session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Send session not found")
+
+    async def event_generator():
+        # Send initial state
+        yield f"data: {json.dumps({'type': 'init', **session.get_stats()})}\n\n"
+
+        while True:
             try:
-                log(f"HTTP RELAY: Sending email to {recipient_email} via Google Apps Script Web App...", "INFO")
-                payload = {
-                    "to": recipient_email,
-                    "subject": subject,
-                    "body": body,
-                    "token": os.getenv("APPS_SCRIPT_SECRET", "clinic-flow-secret-token")
-                }
-                response = requests.post(apps_script_url, json=payload, timeout=15)
-                if response.status_code == 200:
-                    try:
-                        res_json = response.json()
-                        if res_json.get("status") == "success":
-                            log(f"HTTP RELAY: Successfully sent email to {recipient_email} via Apps Script", "OK")
-                            return True, "Success"
-                        else:
-                            relay_err = res_json.get("message", "Unknown relay error")
-                            log(f"HTTP RELAY WARNING: {relay_err}", "WARNING")
-                            # Fallback to SMTP
-                    except Exception as json_err:
-                        log(f"HTTP RELAY WARNING: Response not JSON: {response.text[:200]}", "WARNING")
-                        # Fallback to SMTP
-                else:
-                    log(f"HTTP RELAY WARNING: Request failed with status code {response.status_code}", "WARNING")
-                    # Fallback to SMTP
-            except Exception as relay_ex:
-                log(f"HTTP RELAY WARNING: Connection failed: {str(relay_ex)}", "WARNING")
-                # Fallback to SMTP
-        
-        # Standard SMTP Flow
-        email_user = os.getenv("EMAIL_USER")
-        email_pass = os.getenv("EMAIL_PASS")
-        email_host = os.getenv("EMAIL_HOST", "smtp.gmail.com")
-        try:
-            email_port = int(os.getenv("EMAIL_PORT", "587"))
-        except:
-            email_port = 587
-            
-        if not email_user or not email_pass:
-            msg = "Email credentials (EMAIL_USER or EMAIL_PASS) or APPS_SCRIPT_URL not configured."
-            log(msg, "WARNING")
-            return False, msg
-            
-        # Create message container
-        msg = MIMEMultipart()
-        msg['From'] = email_user
-        msg['To'] = recipient_email
-        msg['Subject'] = subject
-        
-        # Record the MIME types
-        msg.attach(MIMEText(body, 'plain', 'utf-8'))
-        
-        # Connect and send
-        connected = False
-        server = None
-        conn_errors = []
-        
-        # Try configured port first
-        try:
-            log(f"SMTP: Connecting to {email_host}:{email_port}...", "INFO")
-            if email_port == 465:
-                server = smtplib.SMTP_SSL(email_host, email_port, timeout=15)
-            else:
-                server = smtplib.SMTP(email_host, email_port, timeout=15)
+                event = await asyncio.wait_for(session.event_queue.get(), timeout=30.0)
+                yield f"data: {json.dumps(event)}\n\n"
+
+                if event.get("type") in ("completed", "cancelled", "error"):
+                    break
+            except asyncio.TimeoutError:
+                # Send heartbeat
+                yield f"data: {json.dumps({'type': 'heartbeat', **session.get_stats()})}\n\n"
+                if session.status in ("done", "cancelled", "error"):
+                    break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/send/{send_session_id}/status")
+async def get_send_status(send_session_id: str):
+    """Get current status of a send session."""
+    session = send_sessions.get(send_session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Send session not found")
+    return {
+        **session.get_stats(),
+        "sent_list": session.sent,
+        "failed_list": session.failed,
+    }
+
+
+@app.post("/api/send/{send_session_id}/pause")
+async def pause_send(send_session_id: str):
+    session = send_sessions.get(send_session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session.pause()
+    return {"message": "Paused", "status": session.status}
+
+
+@app.post("/api/send/{send_session_id}/resume")
+async def resume_send(send_session_id: str):
+    session = send_sessions.get(send_session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session.resume()
+    return {"message": "Resumed", "status": session.status}
+
+
+@app.post("/api/send/{send_session_id}/cancel")
+async def cancel_send(send_session_id: str):
+    session = send_sessions.get(send_session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session.cancel()
+    return {"message": "Cancelled", "status": session.status}
+
+
+@app.post("/api/send/{send_session_id}/retry-failed")
+async def retry_failed(send_session_id: str, background_tasks: BackgroundTasks):
+    """Create a new send session for all failed recipients."""
+    old_session = send_sessions.get(send_session_id)
+    if not old_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    failed_recipients = [
+        {"email": f["email"], "name": f.get("name", "")}
+        for f in old_session.failed
+    ]
+
+    if not failed_recipients:
+        return {"message": "No failed recipients to retry"}
+
+    new_session_id = str(uuid.uuid4())
+    new_session = SendSession(new_session_id)
+    new_session.recipients = failed_recipients
+    new_session.subject = old_session.subject
+    new_session.body_html = old_session.body_html
+    new_session.body_text = old_session.body_text
+    new_session.signature = old_session.signature
+    new_session.smtp_config = old_session.smtp_config
+    new_session.attachments = old_session.attachments
+
+    loop = asyncio.get_event_loop()
+    new_session.set_loop(loop)
+    send_sessions[new_session_id] = new_session
+
+    thread = threading.Thread(
+        target=run_send_session, args=(new_session,), daemon=True
+    )
+    thread.start()
+
+    return {"send_session_id": new_session_id, "total": len(failed_recipients)}
+
+
+# ════════════════════════════════════════════════════════════
+# TEST EMAIL
+# ════════════════════════════════════════════════════════════
+
+@app.post("/api/send-test-email")
+async def send_test_email(request: TestEmailRequest):
+    """Send a single test email to verify SMTP config and template."""
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["From"] = request.smtp_config.username
+        msg["To"] = request.to_email
+        msg["Subject"] = f"[TEST] {request.subject}"
+        msg.attach(MIMEText(request.body_text or request.body_html, "plain", "utf-8"))
+        msg.attach(MIMEText(request.body_html, "html", "utf-8"))
+
+        cfg = request.smtp_config
+        if cfg.port == 465:
+            server = smtplib.SMTP_SSL(cfg.host, cfg.port, timeout=15)
+        else:
+            server = smtplib.SMTP(cfg.host, cfg.port, timeout=15)
+            if cfg.use_tls:
                 server.starttls()
-            connected = True
-        except Exception as e:
-            err_msg = f"Port {email_port} connection failed: {str(e)}"
-            log(f"SMTP: {err_msg}", "WARNING")
-            conn_errors.append(err_msg)
-            
-        # Fallback to port 465 with SSL if STARTTLS port failed (Render environment compatibility)
-        if not connected and email_port != 465:
-            try:
-                log(f"SMTP: Render/Cloud environment fallback — attempting SSL connection on {email_host}:465...", "INFO")
-                server = smtplib.SMTP_SSL(email_host, 465, timeout=15)
-                connected = True
-            except Exception as fallback_err:
-                err_msg = f"Port 465 fallback failed: {str(fallback_err)}"
-                log(f"SMTP: {err_msg}", "ERROR")
-                conn_errors.append(err_msg)
-                
-        if not connected or not server:
-            raise Exception(f"Failed to connect to SMTP server. Details: {'; '.join(conn_errors)}")
-            
-        try:
-            log("SMTP: Logging in...", "INFO")
-            server.login(email_user, email_pass)
-            log(f"SMTP: Sending email to {recipient_email}...", "INFO")
-            server.sendmail(email_user, recipient_email, msg.as_string())
-            server.quit()
-        except smtplib.SMTPAuthenticationError as auth_err:
-            log(f"SMTP AUTHENTICATION ERROR: {str(auth_err)}", "ERROR")
-            try:
-                server.close()
-            except:
-                pass
-            return False, f"SMTP Authentication failed: {str(auth_err)}. Please verify your App Password."
-        except Exception as send_err:
-            log(f"SMTP SEND ERROR: {str(send_err)}", "ERROR")
-            try:
-                server.close()
-            except:
-                pass
-            return False, f"SMTP Transmission failed: {str(send_err)}"
-        
-        log(f"OUTREACH: Successfully sent email to {recipient_email}", "OK")
-        return True, "Success"
+
+        server.login(cfg.username, cfg.password)
+        server.sendmail(cfg.username, request.to_email, msg.as_string())
+        server.quit()
+
+        return {"success": True, "message": f"Test email sent to {request.to_email}"}
     except Exception as e:
-        log(f"Outreach Error sending to {clinic.get('email', 'N/A')}: {str(e)}\n{traceback.format_exc()}", "ERROR")
-        return False, str(e)
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-# ────────────────────────────────────────────────────────────
-# FAST API-BASED SEARCH (no Selenium — works on Render)
-# ────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════
+# CAMPAIGN HISTORY
+# ════════════════════════════════════════════════════════════
 
-def _search_via_ddg_library(query, max_results=30):
-    """
-    Use the duckduckgo_search Python library (DDG's real API endpoint, not HTML scraping).
-    Returns list of {title, href, body} dicts.
-    """
-    try:
-        from duckduckgo_search import DDGS
-        results = []
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=max_results, region="wt-wt", safesearch="off"):
-                results.append(r)
-        log(f"[DDG_LIB] Got {len(results)} results for: {query}", "INFO")
-        return results
-    except Exception as e:
-        log(f"[DDG_LIB] Failed: {e}", "WARNING")
-        return []
-
-def _search_via_google_cse(query, max_results=10):
-    """
-    Use Google Custom Search API (100 free queries/day).
-    Requires GOOGLE_CSE_KEY and GOOGLE_CSE_ID environment variables.
-    """
-    api_key = os.getenv("GOOGLE_CSE_KEY", "")
-    cse_id  = os.getenv("GOOGLE_CSE_ID", "")
-    if not api_key or not cse_id:
-        return []
-    try:
-        url = "https://www.googleapis.com/customsearch/v1"
-        params = {"key": api_key, "cx": cse_id, "q": query, "num": min(max_results, 10)}
-        resp = requests.get(url, params=params, timeout=10)
-        resp.raise_for_status()
-        items = resp.json().get("items", [])
-        results = [{"title": i.get("title", ""), "href": i.get("link", ""), "body": i.get("snippet", "")} for i in items]
-        log(f"[GCSE] Got {len(results)} results for: {query}", "INFO")
-        return results
-    except Exception as e:
-        log(f"[GCSE] Failed: {e}", "WARNING")
-        return []
-
-def _search_via_bing(query, max_results=10):
-    """
-    Use Bing Web Search API (free tier: 1000 queries/month).
-    Requires BING_SEARCH_KEY environment variable.
-    """
-    api_key = os.getenv("BING_SEARCH_KEY", "")
-    if not api_key:
-        return []
-    try:
-        url = "https://api.bing.microsoft.com/v7.0/search"
-        headers = {"Ocp-Apim-Subscription-Key": api_key}
-        params = {"q": query, "count": max_results, "responseFilter": "Webpages"}
-        resp = requests.get(url, headers=headers, params=params, timeout=10)
-        resp.raise_for_status()
-        pages = resp.json().get("webPages", {}).get("value", [])
-        results = [{"title": p.get("name", ""), "href": p.get("url", ""), "body": p.get("snippet", "")} for p in pages]
-        log(f"[BING] Got {len(results)} results for: {query}", "INFO")
-        return results
-    except Exception as e:
-        log(f"[BING] Failed: {e}", "WARNING")
-        return []
-
-def _search_via_ddg_html(query, max_results=15):
-    """
-    Fallback: DuckDuckGo HTML scraping (may be blocked on datacenter IPs).
-    """
-    try:
-        import re as _re
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-        encoded_query = urllib.parse.quote_plus(query)
-        resp = requests.get(f"https://html.duckduckgo.com/html/?q={encoded_query}", headers=headers, timeout=15)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-        blocks = soup.find_all("div", class_="result")
-        results = []
-        for block in blocks[:max_results]:
-            a = block.find("a", class_="result__a")
-            s = block.find("a", class_="result__snippet") or block.find("div", class_="result__snippet")
-            if not a:
-                continue
-            href = a.get("href", "")
-            if "uddg=" in href:
-                try:
-                    parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
-                    href = urllib.parse.unquote(parsed.get("uddg", [""])[0])
-                except Exception:
-                    pass
-            results.append({"title": a.get_text(strip=True), "href": href, "body": s.get_text(" ", strip=True) if s else ""})
-        log(f"[DDG_HTML] Got {len(results)} results for: {query}", "INFO")
-        return results
-    except Exception as e:
-        log(f"[DDG_HTML] Failed: {e}", "WARNING")
-        return []
+@app.get("/api/campaigns")
+async def get_campaigns():
+    """List all campaigns."""
+    campaigns = await list_campaigns()
+    return {"campaigns": campaigns}
 
 
-def run_ddg_fallback_search(query, on_clinic_found, seen_names, city, country, specialization):
-    """
-    Multi-source fast search (no Selenium/Chrome). Tries sources in priority order:
-      1. duckduckgo_search library (DDG real API)
-      2. Google Custom Search API (needs GOOGLE_CSE_KEY + GOOGLE_CSE_ID)
-      3. Bing Web Search API (needs BING_SEARCH_KEY)
-      4. DuckDuckGo HTML scraping (last resort)
-    Returns number of new clinics found.
-    """
-    import re
-    log(f"[FAST_SEARCH] Starting for: {query}", "INFO")
-    add_log(f"⚡ Fast API Search: {query}")
-    
-    skip_domains = [
-        "wikipedia.org", "facebook.com", "instagram.com", "twitter.com",
-        "linkedin.com", "yelp.com", "tripadvisor.com", "yellowpages.com",
-        "healthgrades.com", "zocdoc.com", "webmd.com", "nhs.uk",
-        "practo.com", "justdial.com", "sulekha.com", "google.com",
-        "maps.google.com", "youtube.com", "reddit.com", "quora.com"
-    ]
-    
-    # Try sources in order until we get results
-    raw_results = []
-    source_used = None
-    
-    for source_name, source_fn in [
-        ("DDG Library",  lambda: _search_via_ddg_library(query)),
-        ("Google CSE",   lambda: _search_via_google_cse(query)),
-        ("Bing Search",  lambda: _search_via_bing(query)),
-        ("DDG HTML",     lambda: _search_via_ddg_html(query)),
-    ]:
-        raw_results = source_fn()
-        if raw_results:
-            source_used = source_name
-            add_log(f"✅ {source_name} returned {len(raw_results)} results")
-            break
-        else:
-            log(f"[FAST_SEARCH] {source_name} returned 0 — trying next source", "WARNING")
-    
-    if not raw_results:
-        log(f"[FAST_SEARCH] All sources returned 0 for: {query}", "WARNING")
-        add_log(f"⚠️ All search sources returned 0 results for: {query}")
-        return 0
-    
-    log(f"[FAST_SEARCH] Processing {len(raw_results)} results from {source_used}", "INFO")
-    found_count = 0
-    
-    for r in raw_results:
-        try:
-            name    = r.get("title", "").strip()
-            website = r.get("href", "").strip()
-            snippet = r.get("body", "").strip()
-            
-            if not name or len(name) < 3:
-                continue
-            if any(skip in website.lower() for skip in skip_domains):
-                continue
-            
-            name_lower = name.lower()
-            if name_lower in seen_names:
-                continue
-            
-            # Extract phone from snippet
-            phone_match = re.search(r"[\+]?[\d][\d\s\-\.\(\)]{7,15}\d", snippet)
-            phone = phone_match.group(0).strip() if phone_match else ""
-            
-            clinic_candidate = {
-                "name": name,
-                "website": website,
-                "phone": phone,
-                "address": snippet[:200] if snippet else "",
-            }
-            
-            log(f"[FAST_SEARCH] Clinic: {name} | {website}", "INFO")
-            on_clinic_found(clinic_candidate)
-            found_count += 1
-            
-        except Exception as parse_err:
-            log(f"[FAST_SEARCH] Error processing result: {parse_err}", "WARNING")
-            continue
-    
-    log(f"[FAST_SEARCH] Found {found_count} new clinics for: {query}", "INFO")
-    return found_count
-
-# ────────────────────────────────────────────────────────────
-# SCRAPER TASK
-# ────────────────────────────────────────────────────────────
+@app.get("/api/campaigns/{campaign_id}")
+async def get_campaign_detail(campaign_id: int):
+    """Get a campaign with its recipients."""
+    campaign = await get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    recipients = await get_recipients(campaign_id)
+    return {**campaign, "recipients": recipients}
 
 
-def run_scraper_task(city, country, specialization, auto_outreach, template=""):
-    """Main scraper orchestration function."""
-    global live_db
-    
-    log(f"[SCRAPER_TASK_START] Starting scraper task for {specialization} in {city}, {country}", "INFO")
-    add_log(f"🚀 DISCOVERY INITIATED: {specialization} in {city}, {country or 'Global'}")
-    
-    # Load existing clinics from memory/file storage to append new results
-    live_db = load_data(verbose=False)
-    log("Loaded existing clinics to append new search results.", "INFO")
-
-    scraper = None
-    try:
-        log(f"[SCRAPER_TASK_LOCK] Acquiring scraper lock...", "INFO")
-        scraper_lock.acquire()
-        
-        log(f"[SCRAPER_TASK_QUERY_SETUP] Setting up query variations", "INFO")
-        
-        # Determine if the specialization/category looks like a medical field
-        medical_keywords = ['clinic', 'health', 'dental', 'doctor', 'physio', 'gynae', 'pediatr',
-                            'cardi', 'hospital', 'medical', 'dentist', 'gynaecologist', 'clinics',
-                            'therapy', 'surgeon', 'ortho', 'derma', 'neuro', 'optic']
-        is_medical = any(w in specialization.lower() for w in medical_keywords)
-
-        # For short/generic terms like "AI", "ML", "SEO" — add business-type suffixes so search
-        # engines return actual companies instead of news articles, tools, or events.
-        spec_is_short = len(specialization.split()) <= 2
-        business_suffixes = ['company', 'agency', 'startup', 'firm', 'consultancy', 'services']
-
-        if is_medical:
-            base_queries = [
-                f"{specialization} in {city}",
-                f"best {specialization} in {city}",
-                f"top {specialization} in {city}",
-                f"{specialization} near {city}",
-                f"list of {specialization} in {city}",
-                f"{specialization} directory {city}",
-            ]
-        elif spec_is_short:
-            # Generic/tech terms: add business suffixes to target actual companies
-            base_queries = [
-                f"{specialization} company in {city}",
-                f"{specialization} agency in {city}",
-                f"{specialization} startup in {city}",
-                f"{specialization} firm in {city}",
-                f"{specialization} consultancy in {city}",
-                f"top {specialization} companies in {city}",
-                f"best {specialization} agency in {city}",
-                f"list of {specialization} companies {city}",
-                f"{specialization} companies directory {city}",
-                f"{specialization} services {city}",
-            ]
-        else:
-            base_queries = [
-                f"{specialization} in {city}",
-                f"best {specialization} in {city}",
-                f"top {specialization} in {city}",
-                f"{specialization} near {city}",
-                f"list of {specialization} in {city}",
-                f"{specialization} directory {city}",
-            ]
-
-        query_variations = []
-        for q in base_queries:
-            if country:
-                query_variations.append(f"{q}, {country}")
-            else:
-                query_variations.append(q)
-
-        # Remove any duplicates in queries
-        seen_qs = set()
-        unique_queries = []
-        for q in query_variations:
-            q_lower = q.lower()
-            if q_lower not in seen_qs:
-                seen_qs.add(q_lower)
-                unique_queries.append(q)
-        query_variations = unique_queries
-        
-        log(f"[SCRAPER_TASK_QUERY_SETUP] Generated {len(query_variations)} unique query variations", "INFO")
-            
-        results = []
-        # Populate seen_names from memory (live_db) to avoid scraping duplicates in subsequent runs or queries
-        seen_names = {c["name"].strip().lower() for c in live_db if c.get("name")}
-        TARGET_CLINICS = 150  # Target: 150 unique clinics
-        
-        # Detect if running on Render (cloud) environment — use DDG fallback first
-        is_render = os.getenv("RENDER", "").lower() in ["1", "true", "yes"] or os.getenv("RENDER_SERVICE_NAME", "")
-        log(f"[SCRAPER_TASK_ENV] Running on Render: {bool(is_render)}", "INFO")
-        
-        # ThreadPoolExecutor for background extraction. We run up to 5 workers.
-        # Started here so we can submit tasks dynamically.
-        extraction_executor = ThreadPoolExecutor(max_workers=5)
-        extraction_futures = []
-        verified_count = 0
-        real_count = 0
-        stats_lock = threading.Lock()
-        
-        def extract_and_update(clinic_ref):
-            nonlocal verified_count, real_count
-            try:
-                log(f"[PROCESS_START] Processing clinic: {clinic_ref.get('name')}", "INFO")
-                website = clinic_ref.get("website", "").strip()
-                name = clinic_ref.get("name", "").strip()
-                
-                # Verify duplicate on name, website, phone
-                if is_duplicate_clinic(clinic_ref, exclude_name=name):
-                    log(f"🗑️ REJECTED - Duplicate website/phone/name for {name}", "WARNING")
-                    # Remove it from live_db
-                    global live_db
-                    live_db = [c for c in live_db if c["name"].lower() != name.lower()]
-                    save_data()
-                    if supabase_connected:
-                        supabase_delete("clinics", {"name": f"eq.{name}", "city": f"eq.{city}"})
-                    return
-
-                log(f"[PROCESS_EXTRACT] Attempting email extraction for {name} with website: {website}", "INFO")
-                
-                # Extract email: M1 homepage + M2 subpages + M3 deep crawl + M8 construct
-                # Skips M4-M7 (Google/Bing/DDG/WHOIS) to keep extraction fast
-                email = extract_email_max(clinic_ref, fast_mode=True)
-                
-                clinic_ref["email"] = email
-                clinic_ref["status"] = "Verified" if email else "Unverified"
-                
-                if email:
-                    # Verify if this newly found email is a duplicate of another clinic
-                    if is_duplicate_clinic(clinic_ref, exclude_name=name):
-                        log(f"🗑️ REJECTED - Email '{email}' is already associated with another clinic.", "WARNING")
-                        live_db = [c for c in live_db if c["name"].lower() != name.lower()]
-                        save_data()
-                        if supabase_connected:
-                            supabase_delete("clinics", {"name": f"eq.{name}", "city": f"eq.{city}"})
-                        add_log(f"🗑️ Removed duplicate clinic (matching email): {name}")
-                        return
-                    
-                    with stats_lock:
-                        verified_count += 1
-                    add_log(f"✅ Found email: {email}")
-                    log(f"[PROCESS_EMAIL_FOUND] Email found! verified_count now = {verified_count}", "OK")
-                    
-                    if auto_outreach:
-                        add_log(f"⏳ Auto-outreach: Sending email to {name}...")
-                        success, err_msg = auto_send(clinic_ref, template)
-                        if success:
-                            clinic_ref["outreach_status"] = "Contacted"
-                            add_log(f"🚀 Auto-outreach: Email sent successfully to {name}")
-                        else:
-                            add_log(f"❌ Auto-outreach failed for {name}: {err_msg}")
-                else:
-                    log(f"[PROCESS_EMAIL_EMPTY] Email extraction returned empty", "WARNING")
-                
-                # Store or update in Supabase
-                if supabase_connected:
-                    clinic_payload = {
-                        "name": clinic_ref.get("name"),
-                        "city": clinic_ref.get("city"),
-                        "country": clinic_ref.get("country"),
-                        "specialization": clinic_ref.get("specialization"),
-                        "address": clinic_ref.get("address"),
-                        "phone": clinic_ref.get("phone"),
-                        "website": clinic_ref.get("website"),
-                        "email": clinic_ref.get("email"),
-                        "status": clinic_ref.get("status"),
-                        "outreach_status": clinic_ref.get("outreach_status"),
-                        "discovery_date": clinic_ref.get("discovery_date")
-                    }
-                    success = supabase_upsert("clinics", [clinic_payload], on_conflict="name,city")
-                    if success:
-                        log(f"[PROCESS_SUPABASE_SAVED] Saved to Supabase clinics table", "INFO")
-                
-                save_data()
-                log(f"[PROCESS_SAVED] Data persisted to JSON", "OK")
-                
-                with stats_lock:
-                    real_count += 1
-                
-            except Exception as e:
-                log(f"[PROCESS_ERROR] Exception in process_clinic: {str(e)}\n{traceback.format_exc()}", "ERROR")
-
-        def on_clinic_found(res):
-            res_name_lower = res["name"].strip().lower()
-            if res_name_lower not in seen_names:
-                seen_names.add(res_name_lower)
-                results.append(res)
-                
-                # Immediately initialize as unverified clinic and add to live_db for real-time frontend streaming
-                clinic_data = {
-                    "name": res["name"],
-                    "city": city,
-                    "country": country or "Global",
-                    "specialization": specialization,
-                    "address": res.get("address", ""),
-                    "phone": res.get("phone", ""),
-                    "website": res.get("website", ""),
-                    "email": "",
-                    "status": "Unverified",
-                    "outreach_status": "Pending",
-                    "discovery_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                }
-                
-                # Check for duplicates using new strict checks (skip Supabase on the main Selenium thread)
-                if not is_duplicate_clinic(clinic_data, check_supabase=False):
-                    live_db.append(clinic_data)
-                    save_data()  # Persist to disk immediately
-                    add_log(f"✨ Found clinic #{len(live_db)}: {clinic_data['name']}")
-                    log(f"Streamed clinic: {clinic_data['name']}", "OK")
-                    
-                    # Submit to background extraction pool
-                    future = extraction_executor.submit(extract_and_update, clinic_data)
-                    extraction_futures.append(future)
-
-        log(f"[SCRAPER_TASK_SEARCH_LOOP] Starting query loop — Target: {TARGET_CLINICS} unique clinics", "INFO")
-        
-        # ── Phase 1: DuckDuckGo fast search (no Selenium, works great on Render) ──
-        ddg_total = 0
-        # ── Phase 1: DuckDuckGo search — ALWAYS runs (local + Render) ──────────
-        add_log("🌐 Phase 1: DuckDuckGo API search (fast, no browser)...")
-        for idx, query in enumerate(query_variations):
-            if len(results) >= TARGET_CLINICS:
-                add_log(f"🎯 Target of {TARGET_CLINICS} clinics reached. Stopping DDG search.")
-                break
-            log(f"[DDG_PHASE] Query {idx+1}/{len(query_variations)}: {query}", "INFO")
-            add_log(f"🦆 DDG Query {idx+1}/{len(query_variations)}: {query} | Found in this run: {len(results)}")
-            count = run_ddg_fallback_search(query, on_clinic_found, seen_names, city, country, specialization)
-            ddg_total += count
-        add_log(f"✅ DDG Phase complete — found {ddg_total} new leads. Total in this run: {len(results)}")
-        log(f"[DDG_PHASE_DONE] DDG phase found {ddg_total} clinics", "INFO")
-
-        # ── Phase 2: Selenium/Google Maps — runs locally to supplement DDG ──────
-        use_selenium = not is_render  # Only on local; Render has no Chrome
-        if use_selenium and len(results) < TARGET_CLINICS:
-            add_log(f"🔍 Phase 2: Selenium/Google Maps search (found {len(results)} so far in this run, need {TARGET_CLINICS})...")
-
-            # Initialize Selenium only when needed
-            if scraper is None:
-                log(f"[SCRAPER_TASK_INIT] Creating ClinicScraper instance...", "INFO")
-                scraper = ClinicScraper()
-                log(f"[SCRAPER_TASK_CREATED] ClinicScraper instance created successfully", "OK")
-
-            for idx, query in enumerate(query_variations):
-                # Stop if we've already found enough clinics
-                if len(results) >= TARGET_CLINICS:
-                    log(f"[SCRAPER_TASK_TARGET_REACHED] Reached {TARGET_CLINICS} unique clinics, stopping queries", "INFO")
-                    add_log(f"🎯 Target of {TARGET_CLINICS} clinics reached after query {idx+1}. Stopping search.")
-                    break
-
-                log(f"[SCRAPER_TASK_QUERY_{idx}] Query {idx+1}/{len(query_variations)}: {query} (found {len(results)} so far in this run)", "INFO")
-                add_log(f"🔍 Query {idx+1}/{len(query_variations)}: {query} | Found so far in this run: {len(results)}")
-
-                try:
-                    scraper.search_google_maps(query, on_clinic_found=on_clinic_found, exclude_names=seen_names)
-                    add_log(f"Query {idx+1} done. Total unique clinics: {len(results)}")
-                except Exception as query_err:
-                    log(f"[SCRAPER_TASK_QUERY_{idx}_ERROR] Query failed: {str(query_err)}\n{traceback.format_exc()}", "ERROR")
-                    add_log(f"Query {idx+1} failed: {str(query_err)}", "WARNING")
-        elif is_render and ddg_total == 0:
-            add_log("⚠️ DDG returned 0 results on Render. No Selenium fallback available.")
+@app.delete("/api/campaigns/{campaign_id}")
+async def remove_campaign(campaign_id: int):
+    """Delete a campaign."""
+    await delete_campaign(campaign_id)
+    return {"message": "Campaign deleted"}
 
 
+@app.get("/api/campaigns/{campaign_id}/report/csv")
+async def download_csv_report(campaign_id: int):
+    """Download campaign report as CSV."""
+    campaign = await get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    recipients = await get_recipients(campaign_id)
 
-        # Ensure we have at least 150 unique clinics. If not, trigger expansion queries.
-        if len(results) < TARGET_CLINICS:
-            log(f"[SCRAPER_TASK_EXPANSION] Only found {len(results)} unique clinics. Initiating search expansion...", "INFO")
-            add_log(f"⚠️ Search yielded only {len(results)} clinics. Triggering dynamic search expansion to meet {TARGET_CLINICS}+ target...")
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Email", "Name", "Status", "Error", "Sent At"])
+    for r in recipients:
+        writer.writerow([
+            r.get("email", ""),
+            r.get("name", ""),
+            r.get("status", ""),
+            r.get("error", ""),
+            r.get("sent_at", ""),
+        ])
 
-            if spec_is_short and not is_medical:
-                # For generic/tech terms: use different business suffixes in expansion
-                expansion_queries = [
-                    f"{specialization} solutions {city}",
-                    f"{specialization} tech company {city}",
-                    f"{specialization} development company {city}",
-                    f"{specialization} software company {city}",
-                    f"hire {specialization} {city}",
-                    f"{specialization} experts {city}",
-                ]
-            else:
-                expansion_queries = [
-                    f"{specialization} in {city} surrounding areas",
-                    f"affordable {specialization} in {city}",
-                    f"{specialization} centre {city}",
-                    f"{specialization} services {city}",
-                ]
-            if country:
-                expansion_queries = [f"{q}, {country}" for q in expansion_queries]
+    output.seek(0)
+    filename = f"campaign_{campaign_id}_{campaign['name'].replace(' ', '_')}.csv"
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
-            # Filter duplicates or queries we already ran
-            unique_exp_queries = []
-            for eq in expansion_queries:
-                if eq.lower() not in seen_qs:
-                    seen_qs.add(eq.lower())
-                    unique_exp_queries.append(eq)
 
-            # DDG expansion — ALWAYS runs (local + Render)
-            for idx_exp, query in enumerate(unique_exp_queries):
-                if len(results) >= TARGET_CLINICS:
-                    break
-                log(f"[SCRAPER_TASK_EXPANSION_DDG_{idx_exp}] DDG Expansion: {query}", "INFO")
-                add_log(f"🦆 DDG Expansion {idx_exp+1}: {query} | Found so far in this run: {len(results)}")
-                run_ddg_fallback_search(query, on_clinic_found, seen_names, city, country, specialization)
+# ════════════════════════════════════════════════════════════
+# HEALTH & FRONTEND FALLBACK
+# ════════════════════════════════════════════════════════════
 
-            
-            # Phase 2 expansion: Selenium (only if scraper still alive and we need more)
-            if scraper and len(results) < TARGET_CLINICS:
-                for idx_exp, query in enumerate(unique_exp_queries):
-                    if len(results) >= TARGET_CLINICS:
-                        log(f"[SCRAPER_TASK_EXPANSION_TARGET_REACHED] Reached {len(results)} unique clinics, stopping expansion", "INFO")
-                        add_log(f"🎯 Target of {TARGET_CLINICS}+ unique clinics reached during search expansion. Stopping search.")
-                        break
-                        
-                    log(f"[SCRAPER_TASK_EXPANSION_{idx_exp}] Expansion Query {idx_exp+1}/{len(unique_exp_queries)}: {query} (found {len(results)} so far in this run)", "INFO")
-                    add_log(f"🔍 Expansion Query {idx_exp+1}/{len(unique_exp_queries)}: {query} | Found so far in this run: {len(results)}")
-                    
-                    try:
-                        scraper.search_google_maps(query, on_clinic_found=on_clinic_found, exclude_names=seen_names)
-                        add_log(f"Expansion Query {idx_exp+1} done. Total unique clinics: {len(results)}")
-                    except Exception as query_err:
-                        log(f"[SCRAPER_TASK_EXPANSION_{idx_exp}_ERROR] Expansion query failed: {str(query_err)}\n{traceback.format_exc()}", "ERROR")
-                        add_log(f"Expansion Query {idx_exp+1} failed: {str(query_err)}")
-
-        
-        # Close Selenium browser and release lock immediately to free up resources
-        if scraper:
-            try:
-                log(f"[SCRAPER_TASK_CLEANUP] Closing scraper browser...", "INFO")
-                scraper.close()
-                scraper = None
-                log("Scraper browser closed", "OK")
-            except Exception as e:
-                log(f"Error closing scraper: {str(e)}", "WARNING")
-        
-        if scraper_lock.locked():
-            scraper_lock.release()
-            log(f"[SCRAPER_TASK_LOCK] Released scraper lock", "INFO")
-            
-        if not results:
-            log(f"[SCRAPER_TASK_NO_RESULTS] No clinics found matching criteria", "WARNING")
-            add_log("❌ No clinics found matching criteria", "WARNING")
-            return
-        
-        # Wait for all background extractions to finish
-        log(f"[SCRAPER_TASK_WAIT] Waiting for background email extractions to complete ({len(extraction_futures)} tasks)...", "INFO")
-        add_log(f"⏳ Waiting for background email extractions to complete ({len(extraction_futures)} tasks)...")
-        
-        # Shutdown the executor, waiting for running futures to finish
-        extraction_executor.shutdown(wait=True)
-        
-        log(f"[SCRAPER_TASK_SUMMARY] DISCOVERY COMPLETE - real_count={real_count}, verified_count={verified_count}", "OK")
-        add_log(f"✅ DISCOVERY COMPLETE:")
-        add_log(f"   📊 Total clinics found: {real_count}")
-        add_log(f"   📧 With verified emails: {verified_count}")
-        add_log(f"   🎯 Success rate: {round(verified_count/real_count*100) if real_count else 0}%")
-        add_log(f"   💾 Saved in database: {real_count}")
-        
-    except Exception as e:
-        error_msg = f"CRITICAL SCRAPER FAILURE: {str(e)}\n{traceback.format_exc()}"
-        log(f"[SCRAPER_TASK_ERROR] {error_msg}", "ERROR")
-        add_log(f"❌ {error_msg}", "ERROR")
-    finally:
-        if scraper:
-            try:
-                log(f"[SCRAPER_TASK_CLEANUP] Closing scraper browser in finally...", "INFO")
-                scraper.close()
-                log("Scraper browser closed", "OK")
-            except Exception as e:
-                log(f"Error closing scraper: {str(e)}", "WARNING")
-        if scraper_lock.locked():
-            scraper_lock.release()
-            log(f"[SCRAPER_TASK_LOCK] Released scraper lock in finally", "INFO")
-
-# ────────────────────────────────────────────────────────────
-# API ENDPOINTS
-# ────────────────────────────────────────────────────────────
-
-@app.route('/api', methods=['GET'])
-def api_index():
-    """Root route - show API info."""
-    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    return jsonify({
-        "name": "ClinicFlow AI - Backend API",
-        "status": "running",
+@app.get("/api/health")
+async def health():
+    return {
+        "status": "ok",
         "version": "1.0.0",
-        "frontend_url": frontend_url,
-        "message": f"Open {frontend_url} in your browser to use the app!",
-        "endpoints": {
-            "health":   "GET  /api/health",
-            "clinics":  "GET  /api/clinics",
-            "stats":    "GET  /api/stats",
-            "logs":     "GET  /api/logs",
-            "search":   "POST /api/search",
-            "outreach": "POST /api/outreach",
-            "generate": "POST /api/generate-protocol"
-        }
-    }), 200
-
-# Catch-all route to serve the React frontend app
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_frontend(path):
-    if path.startswith('api/') or path == 'api':
-        return jsonify({"error": "Not Found"}), 404
-        
-    if app.static_folder and os.path.exists(os.path.join(app.static_folder, 'index.html')):
-        return send_from_directory(app.static_folder, 'index.html')
-        
-    return api_index()
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+    }
 
 
-@app.route('/api/search', methods=['POST'])
-def launch_search():
-    """Launch a clinic discovery scan."""
-    try:
-        data = request.json or {}
-        city = data.get('city', '').strip()
-        country = data.get('country', '').strip()
-        specialization = data.get('specialization', '').strip()
-        auto_outreach = data.get('auto_outreach', False)
-        
-        # Validation
-        if not city or not specialization:
-            log("Invalid search request: missing city or specialization", "WARNING")
-            return jsonify({
-                "error": "Missing required fields: city and specialization"
-            }), 400
-        
-        add_log(f"📡 New search request: {specialization} in {city}, {country}")
-        
-        template = data.get('template', '')
-        
-        # Launch async scraper task
-        thread = threading.Thread(
-            target=run_scraper_task,
-            args=(city, country, specialization, auto_outreach, template),
-            daemon=True
-        )
-        thread.start()
-        
-        return jsonify({
-            "message": "Discovery protocol launched successfully",
-            "query": f"{specialization} in {city}, {country}",
-            "status": "running"
-        }), 202
-        
-    except Exception as e:
-        log(f"Search endpoint error: {str(e)}", "ERROR")
-        return jsonify({"error": "Internal server error"}), 500
+@app.get("/api/smtp-presets")
+async def smtp_presets():
+    """Return common SMTP provider presets."""
+    return {
+        "presets": [
+            {"name": "Gmail", "host": "smtp.gmail.com", "port": 587, "use_tls": True},
+            {"name": "Outlook / Hotmail", "host": "smtp.office365.com", "port": 587, "use_tls": True},
+            {"name": "Yahoo Mail", "host": "smtp.mail.yahoo.com", "port": 587, "use_tls": True},
+            {"name": "Custom SMTP", "host": "", "port": 587, "use_tls": True},
+        ]
+    }
 
-@app.route('/api/clinics', methods=['GET'])
-def get_clinics():
-    """Fetch clinics with optional filters."""
-    global live_db
-    live_db = load_data(verbose=False)
-    try:
-        city = request.args.get('city', '').strip().lower()
-        spec = request.args.get('specialization', '').strip().lower()
-        status_filter = request.args.get('status', '').strip()
-        
-        data = []
-        
-        # Try to fetch from Supabase first
-        if supabase_connected:
-            params = {}
-            if city:
-                params["city"] = f"ilike.{city}"
-            if spec:
-                params["specialization"] = f"ilike.{spec}"
-            if status_filter in ['Verified', 'Unverified']:
-                params["status"] = f"eq.{status_filter}"
-            
-            params["order"] = "discovery_date.desc"
-            params["limit"] = "100"
-            
-            db_rows = supabase_get("clinics", params)
-            if db_rows:
-                data.extend(db_rows)
-                log(f"Fetched {len(db_rows)} clinics from Supabase", "OK")
-        
-        # Add live_db entries not in Supabase/database
-        if live_db:
-            existing_names = {c['name'] for c in data}
-            for live_clinic in live_db:
-                if live_clinic['name'] not in existing_names:
-                    # Apply same filters to live_db
-                    if city and city.lower() not in live_clinic.get('city', '').lower():
-                        continue
-                    if spec and spec.lower() not in live_clinic.get('specialization', '').lower():
-                        continue
-                    if status_filter and live_clinic.get('status') != status_filter:
-                        continue
-                    data.insert(0, live_clinic)
-        
-        # If no filters applied and we got some data, return all
-        if not data and not city and not spec:
-            log("No clinics found in database", "WARNING")
-            return jsonify([]), 200
-        
-        return jsonify(data), 200
-        
-    except Exception as e:
-        log(f"Clinics endpoint error: {str(e)}", "ERROR")
-        return jsonify({"error": "Internal server error"}), 500
 
-@app.route('/api/clinics', methods=['DELETE'])
-def clear_all_clinics():
-    """Clear all clinics or delete a specific clinic from database and memory file."""
-    global live_db
-    try:
-        name = request.args.get('name', '').strip()
-        city = request.args.get('city', '').strip()
+# Serve React SPA fallback
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    index_path = os.path.join(dist_folder, "index.html")
+    if os.path.isfile(index_path):
+        return FileResponse(index_path)
+    return JSONResponse({"message": "AI Bulk Email Sender API is running"})
 
-        if name and city:
-            # Delete single clinic
-            if supabase_connected:
-                success = supabase_delete("clinics", {"name": f"eq.{name}", "city": f"eq.{city}"})
-                if success:
-                    log(f"✓ Deleted clinic '{name}' from Supabase", "OK")
-            
-            live_db = [c for c in live_db if not (c.get('name') == name and c.get('city') == city)]
-            save_data()
-            log(f"✓ Deleted clinic '{name}' from memory and file storage", "OK")
-            add_log(f"🗑️ Clinic Deleted: '{name}' was deleted by administrator.")
-            return jsonify({"message": f"Clinic '{name}' successfully deleted."}), 200
-        else:
-            # Clear all clinics
-            if supabase_connected:
-                success = supabase_delete("clinics", {"id": "not.is.null"})
-                if success:
-                    log("✓ Cleared all clinics from Supabase", "OK")
-                
-            live_db = []
-            save_data()
-            log("✓ Cleared all clinics from memory and file storage", "OK")
-            add_log("🗑️ Database Cleared: All clinical leads deleted by administrator.")
-            return jsonify({"message": "All clinical leads successfully deleted."}), 200
-        
-    except Exception as e:
-        log(f"Error clearing clinics: {str(e)}", "ERROR")
-        return jsonify({"error": f"Failed to clear database: {str(e)}"}), 500
 
-@app.route('/api/stats', methods=['GET'])
-def get_stats():
-    """Get statistics about clinic discovery."""
-    global live_db
-    live_db = load_data(verbose=False)
-    try:
-        stats = {
-            "total": 0,
-            "verified": 0,
-            "unverified": 0,
-            "contacted": 0,
-            "pending": 0
-        }
-        
-        # Get from Supabase
-        if supabase_connected:
-            rows = supabase_get("clinics")
-            if rows:
-                stats["total"] = len(rows)
-                stats["verified"] = len([r for r in rows if r.get("status") == "Verified"])
-                stats["unverified"] = len([r for r in rows if r.get("status") == "Unverified"])
-                stats["contacted"] = len([r for r in rows if r.get("outreach_status") == "Contacted"])
-                stats["pending"] = len([r for r in rows if r.get("outreach_status") == "Pending"])
-                log(f"Stats retrieved from Supabase: {stats}", "OK")
-        
-        # Add live_db stats if no MongoDB data
-        if stats["total"] == 0 and live_db:
-            stats["total"] = len(live_db)
-            stats["verified"] = len([c for c in live_db if c.get('status') == 'Verified'])
-            stats["unverified"] = len([c for c in live_db if c.get('status') == 'Unverified'])
-            stats["contacted"] = len([c for c in live_db if c.get('outreach_status') == 'Contacted'])
-            stats["pending"] = len([c for c in live_db if c.get('outreach_status') == 'Pending'])
-        
-        stats["scraper_running"] = scraper_lock.locked()
-        return jsonify(stats), 200
-        
-    except Exception as e:
-        log(f"Stats endpoint error: {str(e)}", "ERROR")
-        return jsonify(stats), 200
-
-@app.route('/api/logs', methods=['GET'])
-def get_logs():
-    """Get activity logs."""
-    try:
-        limit = request.args.get('limit', 50, type=int)
-        return jsonify(activity_logs[-limit:]), 200
-    except Exception as e:
-        log(f"Logs endpoint error: {str(e)}", "ERROR")
-        return jsonify({"error": "Internal server error"}), 500
-
-@app.route('/api/outreach', methods=['POST'])
-def trigger_outreach():
-    """Trigger bulk outreach to verified clinics."""
-    try:
-        data = request.json or {}
-        clinic_ids = data.get('clinic_names', [])
-        template = data.get('template', '')
-        
-        add_log(f"📧 Bulk outreach initiated for {len(clinic_ids)} clinics")
-        
-        contacted = 0
-        failed = 0
-        
-        for clinic_name in clinic_ids:
-            try:
-                clinic = None
-                if supabase_connected:
-                    rows = supabase_get("clinics", {"name": f"eq.{clinic_name}"})
-                    if rows and len(rows) > 0:
-                        clinic = rows[0]
-                
-                if not clinic:
-                    clinic = next((c for c in live_db if c['name'] == clinic_name), None)
-                
-                if clinic and clinic.get('email'):
-                    success, err_msg = auto_send(clinic, template)
-                    if success:
-                        contacted += 1
-                        if supabase_connected:
-                            supabase_upsert("clinics", [{"name": clinic_name, "city": clinic.get("city"), "outreach_status": "Contacted"}], on_conflict="name,city")
-                        # Also update memory live_db state for real-time tracking
-                        for c in live_db:
-                            if c['name'] == clinic_name:
-                                c['outreach_status'] = 'Contacted'
-                                break
-                    else:
-                        failed += 1
-                        add_log(f"❌ Outreach failed for {clinic_name}: {err_msg}")
-            except Exception as e:
-                log(f"Error contacting {clinic_name}: {str(e)}", "WARNING")
-                failed += 1
-        
-        add_log(f"✓ Outreach complete: {contacted} contacted, {failed} failed")
-        
-        return jsonify({
-            "message": "Bulk outreach protocol completed",
-            "contacted": contacted,
-            "failed": failed
-        }), 200
-        
-    except Exception as e:
-        log(f"Outreach endpoint error: {str(e)}", "ERROR")
-        return jsonify({"error": "Internal server error"}), 500
-
-@app.route('/api/generate-protocol', methods=['POST'])
-def generate_protocol():
-    """Generate a custom email outreach template using NVIDIA AI or a fallback."""
-    try:
-        data = request.json or {}
-        prompt = data.get('prompt', '').strip()
-        
-        if not prompt:
-            return jsonify({"error": "Prompt is required"}), 400
-            
-        nvidia_api_key = os.getenv("NVIDIA_API_KEY")
-        template = ""
-        
-        if nvidia_api_key:
-            try:
-                log(f"Attempting to generate AI protocol using NVIDIA API for prompt: {prompt}")
-                headers = {
-                    "Authorization": f"Bearer {nvidia_api_key}",
-                    "Content-Type": "application/json"
-                }
-                payload = {
-                    "model": "meta/llama-3.1-8b-instruct",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are a professional B2B outreach copywriter. Your goal is to write a highly effective, "
-                                "professional B2B email template/outreach protocol for a business. "
-                                "You MUST include '[Business Name]' as a placeholder where appropriate. "
-                                "Keep the output clean: include a 'Subject:' line at the top, and then the email body. "
-                                "Do not output any introductory or concluding conversational text. Return ONLY the template."
-                            )
-                        },
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.5,
-                    "max_tokens": 1024
-                }
-                
-                response = requests.post(
-                    "https://integrate.api.nvidia.com/v1/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=15
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    template = result['choices'][0]['message']['content'].strip()
-                    log("AI Protocol generated successfully via NVIDIA API")
-                else:
-                    log(f"NVIDIA API request failed with status code {response.status_code}: {response.text}", "WARNING")
-            except Exception as api_err:
-                log(f"Error calling NVIDIA API: {str(api_err)}", "WARNING")
-                
-        # Fallback if NVIDIA API is not configured or fails
-        if not template:
-            log("Using local heuristic template generator fallback", "INFO")
-            template = (
-                f"Subject: Strategic Partnership Inquiry | [Business Name]\n\n"
-                f"Dear Team,\n\n"
-                f"I hope this message finds you well. I am reaching out to [Business Name] regarding a collaboration opportunity in your area.\n\n"
-                f"We have been following your achievements and are highly impressed by your commitment to excellence. We specialize in solutions for businesses, specifically targeting {prompt}.\n\n"
-                f"We would love to discuss how we can support [Business Name] to streamline operations and enhance outcomes.\n\n"
-                f"Are you available for a brief 10-minute introductory call next week?\n\n"
-                f"Best regards,\n"
-                f"Himanshu Shakya\n"
-                f"Lead Developer"
-            )
-            
-        return jsonify({"template": template}), 200
-        
-    except Exception as e:
-        log(f"Generate protocol endpoint error: {str(e)}", "ERROR")
-        return jsonify({"error": "Internal server error"}), 500
-
-@app.route('/api/template', methods=['GET'])
-def get_template():
-    """Retrieve the global email template."""
-    try:
-        template = load_template()
-        return jsonify({"template": template}), 200
-    except Exception as e:
-        log(f"Get template endpoint error: {str(e)}", "ERROR")
-        return jsonify({"error": "Internal server error"}), 500
-
-@app.route('/api/template', methods=['POST'])
-def update_template():
-    """Update the global email template."""
-    try:
-        data = request.json or {}
-        template = data.get('template', '').strip()
-        if not template:
-            return jsonify({"error": "Template is required"}), 400
-            
-        success = save_template(template)
-        if success:
-            return jsonify({
-                "message": "Global outreach template saved successfully",
-                "template": template
-            }), 200
-        else:
-            return jsonify({"error": "Failed to save template"}), 500
-    except Exception as e:
-        log(f"Update template endpoint error: {str(e)}", "ERROR")
-        return jsonify({"error": "Internal server error"}), 500
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint."""
-    global live_db
-    live_db = load_data(verbose=False)
-    try:
-        db_status = "Connected" if supabase_connected else "Disconnected"
-        return jsonify({
-            "status": "healthy",
-            "database": f"Supabase REST ({db_status})",
-            "clinics_count": len(live_db),
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        }), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/api/send-test-email', methods=['POST'])
-def send_test_email():
-    """Send a single test email to verify SMTP credentials."""
-    try:
-        data = request.json or {}
-        test_email = data.get('email', '').strip()
-        template = data.get('template', '')
-        
-        if not test_email:
-            return jsonify({"error": "Test email address is required"}), 400
-            
-        test_clinic = {
-            "name": "Test Clinic",
-            "email": test_email,
-            "website": "http://example.com"
-        }
-        
-        log(f"TEST_EMAIL: Attempting to send test outreach email to {test_email}", "INFO")
-        success, err_msg = auto_send(test_clinic, template)
-        
-        if success:
-            return jsonify({"message": f"Test email successfully sent to {test_email}!"}), 200
-        else:
-            return jsonify({"error": f"Failed to send email: {err_msg}"}), 500
-    except Exception as e:
-        log(f"TEST_EMAIL_ERR: {str(e)}", "ERROR")
-        return jsonify({"error": f"Error initiating test: {str(e)}"}), 500
-
-if __name__ == '__main__':
-    log("=" * 60, "OK")
-    log("LEADFLOW AI BACKEND - STARTING UP", "OK")
-    log("=" * 60, "OK")
-    log(f"Supabase Connection Url: {'Configured' if SUPABASE_URL else 'Not Configured'}", "INFO")
-    log(f"Environment: {os.getenv('ENVIRONMENT', 'development')}", "INFO")
-    log(f"Leads loaded from disk: {len(live_db)}", "INFO")
-    log("=" * 60, "OK")
-
-    try:
-        from waitress import serve
-        port = int(os.getenv('PORT', 8081))
-        log(f"Starting with Waitress WSGI server on port {port}...", "OK")
-        serve(app, host='0.0.0.0', port=port, threads=8)
-    except ImportError:
-        port = int(os.getenv('PORT', 8081))
-        log(f"Waitress not found, falling back to Flask dev server on port {port}...", "WARNING")
-        app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
-
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app:app", host="0.0.0.0", port=8081, reload=True)

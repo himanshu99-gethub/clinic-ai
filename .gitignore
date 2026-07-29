@@ -4,7 +4,7 @@ __pycache__/
 **/*.pyc
 **/__pycache__/
 
-# Environments
+# Environments & secrets
 .env
 .env.local
 .env.*
@@ -12,12 +12,23 @@ venv/
 .venv/
 backend/venv/
 backend/.env
+frontend/.env
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Local database & vectors
+*.db
+*.sqlite
+*.faiss
+*.pkl
 
 # Local logs
 *.log
 **/server.log
 **/server_utf8.log
 
-# Local data files (if they are for local database fallback only)
-# clinics_data.json
-# settings_data.json
+# Build output
+dist/
+frontend/dist/
